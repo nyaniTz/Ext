@@ -35,7 +35,8 @@ def generate():
 
         data = request.get_json() or {}
         email_content = data.get("emailContent", "")
-        model = data.get("model", "gpt-4o-mini")
+        # Allow overriding model per-request; default to cheaper model via env to save quota
+        model = data.get("model") or os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
         messages = data.get("messages") or [
             {"role": "user", "content": f"Write a concise reply for this email:\n\n{email_content}"}
         ]
@@ -106,7 +107,7 @@ def generate():
                 reply = message
 
         return jsonify({"raw": result, "reply": reply})
-    except requests.RequestException as e:
+    except Exception as e:
         app.logger.exception("proxy error")
         return jsonify({"error": "proxy-error", "details": str(e)}), 500
 
