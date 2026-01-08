@@ -10,7 +10,7 @@ load_dotenv()
 app = Flask(__name__)
 limiter = Limiter(app, key_func=get_remote_address, default_limits=["60 per minute"])
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEYs = os.getenv("OPENAI_API_KEYs")
 PROXY_SECRET = os.getenv("PROXY_SECRET")
 
 
@@ -23,7 +23,7 @@ def index():
 @limiter.limit("60 per minute")
 def generate():
     try:
-        key = os.getenv("OPENAI_API_KEY")
+        key = os.getenv("OPENAI_API_KEYs")
         if not key:
             return jsonify({"error": "openai-key-not-configured"}), 500
 
