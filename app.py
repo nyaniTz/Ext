@@ -8,12 +8,7 @@ from flask_limiter.util import get_remote_address
 load_dotenv()
 
 app = Flask(__name__)
-
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["60 per minute"]
-)
+limiter = Limiter(app, key_func=get_remote_address, default_limits=["60 per minute"])
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PROXY_SECRET = os.getenv("PROXY_SECRET")
@@ -32,6 +27,7 @@ def generate():
         if not key:
             return jsonify({"error": "openai-key-not-configured"}), 500
 
+        # Require proxy secret if set
         if PROXY_SECRET:
             header = request.headers.get("X-EXT-SECRET") or request.headers.get("x-ext-secret")
             if not header or header != PROXY_SECRET:
@@ -44,28 +40,65 @@ def generate():
             {"role": "user", "content": f"Write a concise reply for this email:\n\n{email_content}"}
         ]
 
-        payload = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": data.get("max_tokens", 400),
-        }
+        payload = {"model": model, "messages": messages, "max_tokens": data.get("max_tokens", 400)}
 
-        resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = resp.json()
+        # Retry loop for transient 429 responses
+        max_retries = 3
+        backoff_base = 1.0
+        resp = None
+        for attempt in range(max_retries):
+            try:
+                resp = requests.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=30,
+                )
+            except requests.RequestException as e:
+                app.logger.exception("Request to OpenAI failed on attempt %s", attempt + 1)
+                # On network errors, break and return proxy error
+                return jsonify({"error": "proxy-error", "details": str(e)}), 502
 
+            # If rate limited, honor Retry-After header if present, otherwise exponential backoff
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after is not None else (backoff_base * (2 ** attempt))
+                except ValueError:
+                    wait = backoff_base * (2 ** attempt)
+                app.logger.warning("OpenAI returned 429; attempt=%s waiting=%s", attempt + 1, wait)
+                # Sleep before next attempt
+                import time
+
+                time.sleep(wait)
+                continue
+
+            # not a 429, break the retry loop
+            break
+
+        if resp is None:
+            return jsonify({"error": "proxy-error", "details": "no-response-from-openai"}), 502
+
+        # Parse JSON if possible, otherwise capture text
+        try:
+            result = resp.json()
+        except ValueError:
+            result = {"error": "non-json-response", "status_text": resp.text}
+
+        if resp.status_code >= 400:
+            # Forward OpenAI error payload and use the same status code
+            app.logger.error("OpenAI error: %s", result)
+            return jsonify({"error": "openai_error", "details": result}), resp.status_code
+
+        # Try to extract the assistant reply text if present
         reply = None
         choices = result.get("choices")
-        if choices:
+        if choices and isinstance(choices, list) and len(choices) > 0:
             first = choices[0]
+            # new and old formats
             message = first.get("message") or first.get("text")
             if isinstance(message, dict):
                 reply = message.get("content")
@@ -73,7 +106,6 @@ def generate():
                 reply = message
 
         return jsonify({"raw": result, "reply": reply})
-
     except requests.RequestException as e:
         app.logger.exception("proxy error")
         return jsonify({"error": "proxy-error", "details": str(e)}), 500
