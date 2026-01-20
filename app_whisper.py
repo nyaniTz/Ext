@@ -12,6 +12,15 @@ from flask_limiter.util import get_remote_address
 import base64
 import io
 
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["60 per minute"],
+    storage_uri="memory://",
+)
+
+
 load_dotenv()
 
 app = Flask(__name__)

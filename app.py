@@ -2,8 +2,15 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["60 per minute"],
+    storage_uri="memory://",
+)
+
 
 load_dotenv()
 
