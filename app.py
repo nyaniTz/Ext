@@ -16,7 +16,7 @@ PROXY_SECRET = os.getenv("PROXY_SECRET")
 
 @app.route("/", methods=["GET"])
 def index():
-    return "Dux AutoReply Flask proxy running"
+    return "NEU AutoReply Flask proxy running"
 
 
 @app.route("/generate", methods=["POST"])
@@ -143,7 +143,7 @@ PROXY_SECRET = os.getenv("PROXY_SECRET")
 
 @app.route("/", methods=["GET"])
 def index():
-    return "Dux AutoReply Flask proxy running"
+    return "NEU AutoReply Flask proxy running"
 
 
 @app.route("/generate", methods=["POST"])
