@@ -1,17 +1,13 @@
-"""
-Whisper transcription endpoint for NEU AutoReply Extension
-Adds /transcribe endpoint to handle audio transcription via OpenAI Whisper API
-"""
-
 import os
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import base64
-import io
 
+load_dotenv()
+
+app = Flask(__name__)
 
 limiter = Limiter(
     get_remote_address,
@@ -19,6 +15,7 @@ limiter = Limiter(
     default_limits=["60 per minute"],
     storage_uri="memory://",
 )
+
 
 
 load_dotenv()

@@ -2,7 +2,12 @@ import os
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
+load_dotenv()
+
+app = Flask(__name__)
 
 limiter = Limiter(
     get_remote_address,
