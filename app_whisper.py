@@ -13,8 +13,9 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["60 per minute"],
-    storage_uri="memory://",
+    storage_uri=os.getenv("REDIS_URL", "memory://"),
 )
+
 
 
 
