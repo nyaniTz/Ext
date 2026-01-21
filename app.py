@@ -18,7 +18,7 @@ limiter = Limiter(
     app=app,
     default_limits=["60 per minute"],
     storage_uri=os.getenv("REDIS_URL", "memory://"),
-    swallow_errors=True,   # prevents 500 if redis drops
+
 )
 
 
