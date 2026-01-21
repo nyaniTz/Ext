@@ -32,8 +32,14 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["60 per minute"],
+<<<<<<< HEAD
     storage_uri=storage_uri,
+=======
+    storage_uri=os.getenv("REDIS_URL", "memory://"),
+    swallow_errors=True,   # prevents 500 if redis drops
+>>>>>>> 5edcdfd87d70c8b8ac5276b59ba071b547240069
 )
+
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEYs")  # Note: keeping your var name
 PROXY_SECRET = os.getenv("PROXY_SECRET")
