@@ -13,31 +13,12 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configure rate limiter with Redis if available, otherwise memory
-# Parse Redis URL to ensure it's valid, fallback to memory if issues
-redis_url = os.getenv("REDIS_URL", "").strip()
-# Clean up any command prefixes that might have been copied
-if redis_url and "redis-cli" in redis_url:
-    # Extract just the URL part after any command flags
-    parts = redis_url.split()
-    for i, part in enumerate(parts):
-        if part.startswith("redis://") or part.startswith("rediss://"):
-            redis_url = part
-            break
-    else:
-        redis_url = ""
-
-storage_uri = redis_url if redis_url else "memory://"
-
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=["60 per minute"],
-<<<<<<< HEAD
-    storage_uri=storage_uri,
-=======
     storage_uri=os.getenv("REDIS_URL", "memory://"),
-    swallow_errors=True,   # prevents 500 if redis drops
->>>>>>> 5edcdfd87d70c8b8ac5276b59ba071b547240069
+
 )
 
 
