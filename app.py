@@ -245,6 +245,79 @@ def transcribe():
         return jsonify({"error": "proxy-error", "details": str(e)}), 500
 
 
+@app.route("/speak", methods=["POST"])
+@limiter.limit("30 per minute")
+def speak():
+    """
+    Text-to-speech using OpenAI audio/speech API.
+
+    Request JSON:
+    {
+      "text": "string to read",
+      "model": "gpt-4o-mini-tts",  # optional
+      "voice": "alloy"             # optional
+    }
+
+    Response JSON:
+    {
+      "audio": "<base64-encoded audio>",
+      "format": "mp3"
+    }
+    """
+    try:
+        if not OPENAI_API_KEY:
+            return jsonify({"error": "openai-key-not-configured"}), 500
+
+        auth_error = check_auth()
+        if auth_error:
+            return auth_error
+
+        data = request.get_json() or {}
+        text = (data.get("text") or "").strip()
+        model = data.get("model") or "gpt-4o-mini-tts"
+        voice = data.get("voice") or "alloy"
+
+        if not text:
+            return jsonify({"error": "no-text-provided"}), 400
+
+        app.logger.info("TTS /speak called, model=%s voice=%s text_len=%d", model, voice, len(text))
+
+        payload = {
+            "model": model,
+            "input": text,
+            "voice": voice,
+            "format": "mp3"
+        }
+
+        resp = requests.post(
+            "https://api.openai.com/v1/audio/speech",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
+        )
+
+        app.logger.info("TTS API status: %s", resp.status_code)
+
+        if resp.status_code >= 400:
+            try:
+                err_json = resp.json()
+            except ValueError:
+                err_json = {"error": "non-json-response", "status_text": resp.text}
+            app.logger.error("TTS API error: %s", err_json)
+            return jsonify({"error": "openai_error", "details": err_json}), resp.status_code
+
+        audio_bytes = resp.content
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        return jsonify({"audio": audio_b64, "format": "mp3"})
+    except Exception as e:
+        app.logger.exception("speak error")
+        return jsonify({"error": "proxy-error", "details": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
