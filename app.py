@@ -143,7 +143,7 @@ def generate():
 
             return resp_local, None
 
-        # Helper: call Gemini generateContents
+        # Helper: call Gemini generateContent
         def call_gemini_generate():
             # Flatten messages into Gemini format: system prompt + user conversation
             system_parts = []
