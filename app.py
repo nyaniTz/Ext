@@ -10,6 +10,80 @@ from flask_limiter.util import get_remote_address
 
 load_dotenv()
 
+# Optional Postgres for user/usage tracking (skip if env not set)
+def _get_pg_conn():
+    if not all([os.getenv("DATABASE_HOST"), os.getenv("DATABASE_USER"), os.getenv("DATABASE_NAME")]):
+        return None
+    try:
+        import psycopg2
+        return psycopg2.connect(
+            host=os.getenv("DATABASE_HOST"),
+            database=os.getenv("DATABASE_NAME"),
+            user=os.getenv("DATABASE_USER"),
+            password=os.getenv("DATABASE_PASSWORD", ""),
+            port=os.getenv("DATABASE_PORT", "5432"),
+            sslmode="require" if os.getenv("DATABASE_SSL", "true").lower() != "false" else "disable",
+        )
+    except Exception as e:
+        import logging
+        logging.warning("Postgres connect failed (tracking disabled): %s", e)
+        return None
+
+
+def track_user_and_usage(data):
+    """If request has user info, upsert users and insert usage_events. Failures are logged only."""
+    if not data or not isinstance(data.get("user"), dict):
+        return
+    user = data["user"]
+    if not user.get("id") or not user.get("email"):
+        return
+    conn = _get_pg_conn()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at)
+                VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    email = EXCLUDED.email,
+                    provider = EXCLUDED.provider,
+                    last_login_at = EXCLUDED.last_login_at,
+                    updated_at = NOW()
+                """,
+                (
+                    user["id"],
+                    user["email"],
+                    user.get("provider") or "google",
+                    user.get("registeredAt") or None,
+                    user.get("lastLoginAt") or None,
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO usage_events (user_id, event_type, model, created_at)
+                VALUES (%s, %s, %s, NOW())
+                """,
+                (
+                    user["id"],
+                    data.get("event_type") or "GENERATE_REPLY",
+                    data.get("model") or None,
+                ),
+            )
+        conn.commit()
+    except Exception as e:
+        app.logger.exception("Track user/usage error: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 app = Flask(__name__)
 
 # Configure rate limiter with Redis if available, otherwise memory
@@ -70,12 +144,19 @@ def generate():
             return auth_error
 
         data = request.get_json() or {}
+        track_user_and_usage(data)
+
         email_content = data.get("emailContent", "")
         raw_model = (data.get("model") or "").strip()
         if raw_model in ("", "auto", None):
             raw_model = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
 
-        model = raw_model
+        # Map UI names to actual API model IDs (e.g. OpenAI reasoning models)
+        _model_alias = {
+            "o3": "o1",
+            "o4-mini": "o1-mini",
+        }
+        model = _model_alias.get(raw_model, raw_model)
         model_lower = model.lower()
 
         # Decide provider from model id prefix
