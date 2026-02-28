@@ -30,6 +30,115 @@ def _get_pg_conn():
         return None
 
 
+# Credits per event (database stores event_type; we sum credits in SQL)
+CREDITS_REPLY = 40          # GENERATE_REPLY, SUMMARY, GENERATE_REPLY_MULTI
+CREDITS_PLAY_VOICE = 50
+CREDITS_RECORD_VOICE = 50
+FREE_VOICE_PLAY_LIMIT = 2
+FREE_VOICE_RECORD_LIMIT = 2
+
+
+def _credits_sql():
+    """SQL expression: sum of credits for events this UTC month."""
+    return """
+        COALESCE(SUM(CASE event_type
+            WHEN 'GENERATE_REPLY' THEN %s
+            WHEN 'SUMMARY' THEN %s
+            WHEN 'GENERATE_REPLY_MULTI' THEN %s
+            WHEN 'PLAY_VOICE' THEN %s
+            WHEN 'RECORD_VOICE' THEN %s
+            ELSE 0 END), 0)
+    """ % (CREDITS_REPLY, CREDITS_REPLY, CREDITS_REPLY, CREDITS_PLAY_VOICE, CREDITS_RECORD_VOICE)
+
+
+def _is_developer_email(email):
+    """True if email is in DEVELOPER_EMAILS env (comma-separated). Never blocks dev/test accounts."""
+    if not email or not isinstance(email, str):
+        return False
+    dev_list = os.getenv("DEVELOPER_EMAILS", "").strip()
+    if not dev_list:
+        return False
+    emails = [e.strip().lower() for e in dev_list.split(",") if e.strip()]
+    return email.strip().lower() in emails
+
+
+def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_record=False, user_email=None):
+    """
+    Check if user is within monthly quota (credit-based) and optional voice limits.
+    Returns (allowed, used_credits, quota, voice_plays_used, voice_records_used).
+    If DEVELOPER_EMAILS contains user_email, always allowed (no block for dev/test).
+    If no DB or user not found, returns (True, 0, 1000, 0, 0).
+    """
+    if user_email and _is_developer_email(user_email):
+        return True, 0, 1000, 0, 0
+    conn = _get_pg_conn()
+    if not conn or not user_id:
+        return True, 0, 1000, 0, 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT monthly_quota, plan, is_blocked FROM users WHERE id = %s",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return True, 0, 1000, 0, 0
+        monthly_quota, plan, is_blocked = row
+        quota = int(monthly_quota or 1000)
+        if is_blocked:
+            return False, 0, quota, 0, 0
+        is_paid = plan and plan.lower() in ("vip", "paid", "pro")
+        month_start = "date_trunc('month', NOW() AT TIME ZONE 'UTC')"
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT """ + _credits_sql().strip() + """
+                FROM usage_events
+                WHERE user_id = %s AND created_at >= """ + month_start + """
+                """,
+                (user_id,),
+            )
+            used_credits = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM usage_events
+                WHERE user_id = %s AND event_type = 'PLAY_VOICE' AND created_at >= """ + month_start + """
+                """,
+                (user_id,),
+            )
+            voice_plays_used = int(cur.fetchone()[0] or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM usage_events
+                WHERE user_id = %s AND event_type = 'RECORD_VOICE' AND created_at >= """ + month_start + """
+                """,
+                (user_id,),
+            )
+            voice_records_used = int(cur.fetchone()[0] or 0)
+        # Unlimited quota (e.g. -1)
+        if quota < 0:
+            allowed_quota = True
+        else:
+            allowed_quota = (used_credits + required_credits) <= quota
+        allowed_play = is_paid or voice_plays_used < FREE_VOICE_PLAY_LIMIT
+        allowed_record = is_paid or voice_records_used < FREE_VOICE_RECORD_LIMIT
+        if for_voice_play:
+            allowed = allowed_quota and allowed_play
+        elif for_voice_record:
+            allowed = allowed_quota and allowed_record
+        else:
+            allowed = allowed_quota
+        return allowed, used_credits, quota, voice_plays_used, voice_records_used
+    except Exception as e:
+        app.logger.warning("Quota check failed: %s", e)
+        return True, 0, 1000, 0, 0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def track_user_and_usage(data):
     """If request has user info, upsert users and insert usage_events. Failures are logged only."""
     if not data or not isinstance(data.get("user"), dict):
@@ -144,7 +253,21 @@ def generate():
             return auth_error
 
         data = request.get_json() or {}
-        track_user_and_usage(data)
+        user = data.get("user") if isinstance(data.get("user"), dict) else None
+        user_id = user.get("id") if user else None
+
+        # Quota check: 40 credits per text/summary reply. Do not count this request if over quota.
+        if user_id:
+            allowed, used_credits, quota, _vp, _vr = check_quota(
+                user_id, required_credits=CREDITS_REPLY, user_email=user.get("email")
+            )
+            if not allowed:
+                return jsonify({
+                    "error": "quota_exceeded",
+                    "message": "You've reached your free monthly limit. Upgrade to continue.",
+                    "used": used_credits,
+                    "quota": quota,
+                }), 200
 
         email_content = data.get("emailContent", "")
         raw_model = (data.get("model") or "").strip()
@@ -320,6 +443,10 @@ def generate():
                     reply = "\n".join(texts)
                     replies = [reply]
 
+        # Record usage only on successful reply (40 credits per text/summary)
+        if user_id and (reply or replies):
+            track_user_and_usage(data)
+
         return jsonify({"raw": result, "reply": reply, "replies": replies, "provider": provider, "model": model})
         
     except Exception as e:
@@ -330,19 +457,9 @@ def generate():
 @app.route("/transcribe", methods=["POST"])
 @limiter.limit("30 per minute")
 def transcribe():
-    """Transcribe audio using OpenAI Whisper API
-    
-    Request format:
-    {
-        "audio": "base64-encoded-audio-data",
-        "model": "whisper-1"  (optional, defaults to whisper-1)
-    }
-    
-    Response format:
-    {
-        "text": "transcribed text",
-        "raw": {OpenAI API response}
-    }
+    """Transcribe audio using OpenAI Whisper API.
+    Free plan: 50 credits per record, max 2 voice records per month. Check DB for quota/limits.
+    Request: { "audio": "base64...", "model": "whisper-1", "user": { id, email, ... } }
     """
     try:
         if not OPENAI_API_KEY:
@@ -353,11 +470,27 @@ def transcribe():
             return auth_error
 
         data = request.get_json() or {}
+        user = data.get("user") if isinstance(data.get("user"), dict) else None
+        user_id = user.get("id") if user else None
         audio_base64 = data.get("audio", "")
         model = data.get("model", "whisper-1")
 
         if not audio_base64:
             return jsonify({"error": "no-audio-provided"}), 400
+
+        if user_id:
+            allowed, used_credits, quota, voice_plays_used, voice_records_used = check_quota(
+                user_id, required_credits=CREDITS_RECORD_VOICE, for_voice_record=True, user_email=user.get("email")
+            )
+            if not allowed:
+                return jsonify({
+                    "error": "voice_record_locked" if voice_records_used >= FREE_VOICE_RECORD_LIMIT else "quota_exceeded",
+                    "message": "Upgrade your plan to unlock this feature.",
+                    "used": used_credits,
+                    "quota": quota,
+                    "voice_records_used": voice_records_used,
+                    "voice_records_limit": FREE_VOICE_RECORD_LIMIT,
+                }), 200
 
         # Decode base64 audio
         try:
@@ -399,7 +532,10 @@ def transcribe():
 
         # Extract transcription text
         text = result.get("text", "")
-        
+
+        if user_id:
+            track_user_and_usage({"user": user, "event_type": "RECORD_VOICE", "model": model})
+
         return jsonify({"text": text, "raw": result})
         
     except Exception as e:
@@ -412,19 +548,8 @@ def transcribe():
 def speak():
     """
     Text-to-speech using OpenAI audio/speech API.
-
-    Request JSON:
-    {
-      "text": "string to read",
-      "model": "gpt-4o-mini-tts",  # optional
-      "voice": "alloy"             # optional
-    }
-
-    Response JSON:
-    {
-      "audio": "<base64-encoded audio>",
-      "format": "mp3"
-    }
+    Free plan: 50 credits per play, max 2 voice plays per month. Check DB for quota/limits.
+    Request JSON: { "text": "...", "model": "...", "voice": "...", "user": { id, email, ... } }
     """
     try:
         if not OPENAI_API_KEY:
@@ -435,12 +560,28 @@ def speak():
             return auth_error
 
         data = request.get_json() or {}
+        user = data.get("user") if isinstance(data.get("user"), dict) else None
+        user_id = user.get("id") if user else None
         text = (data.get("text") or "").strip()
         model = data.get("model") or "gpt-4o-mini-tts"
         voice = data.get("voice") or "alloy"
 
         if not text:
             return jsonify({"error": "no-text-provided"}), 400
+
+        if user_id:
+            allowed, used_credits, quota, voice_plays_used, voice_records_used = check_quota(
+                user_id, required_credits=CREDITS_PLAY_VOICE, for_voice_play=True, user_email=user.get("email")
+            )
+            if not allowed:
+                return jsonify({
+                    "error": "voice_play_locked" if voice_plays_used >= FREE_VOICE_PLAY_LIMIT else "quota_exceeded",
+                    "message": "Upgrade your plan to unlock this feature.",
+                    "used": used_credits,
+                    "quota": quota,
+                    "voice_plays_used": voice_plays_used,
+                    "voice_plays_limit": FREE_VOICE_PLAY_LIMIT,
+                }), 200
 
         app.logger.info("TTS /speak called, model=%s voice=%s text_len=%d", model, voice, len(text))
 
@@ -473,6 +614,9 @@ def speak():
 
         audio_bytes = resp.content
         audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+        if user_id:
+            track_user_and_usage({"user": user, "event_type": "PLAY_VOICE", "model": model})
 
         return jsonify({"audio": audio_b64, "format": "mp3"})
     except Exception as e:
