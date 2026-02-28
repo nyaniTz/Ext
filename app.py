@@ -165,13 +165,13 @@ def track_user_and_usage(data):
     )
     try:
         with conn.cursor() as cur:
+            end_of_month_sql = "(date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'"
             # Prefer full upsert with plan_ends_at (roadmap: plan end, days remaining in view).
             try:
                 cur.execute(
                     """
                     INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at, plan_ends_at)
-                    VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW(),
-                        (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC')
+                    VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW(), """ + end_of_month_sql + """)
                     ON CONFLICT (id) DO UPDATE SET
                         email = EXCLUDED.email,
                         provider = EXCLUDED.provider,
@@ -179,12 +179,23 @@ def track_user_and_usage(data):
                         updated_at = NOW(),
                         plan_ends_at = CASE
                             WHEN COALESCE(trim(lower(users.plan)), 'free') = 'free'
-                            THEN (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'
+                            THEN """ + end_of_month_sql + """
                             ELSE users.plan_ends_at
                         END
                     """,
                     user_args,
                 )
+                # Also set plan_expires_at if column exists (some DBs/UI use this name).
+                try:
+                    cur.execute(
+                        """
+                        UPDATE users SET plan_expires_at = """ + end_of_month_sql + """
+                        WHERE id::text = %s AND (plan IS NULL OR lower(trim(COALESCE(plan, ''))) = 'free')
+                        """,
+                        (user["id"],),
+                    )
+                except Exception:
+                    pass
             except Exception as col_err:
                 # Column plan_ends_at may not exist yet; fall back to basic upsert.
                 err_code = getattr(col_err, "pgcode", None)
