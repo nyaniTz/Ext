@@ -140,7 +140,9 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
 
 
 def track_user_and_usage(data):
-    """If request has user info, upsert users and insert usage_events. Failures are logged only."""
+    """If request has user info, upsert users and insert usage_events. Failures are logged only.
+    Uses plan_ends_at when the column exists (after migration); otherwise falls back to basic upsert.
+    """
     if not data or not isinstance(data.get("user"), dict):
         return
     user = data["user"]
@@ -149,43 +151,100 @@ def track_user_and_usage(data):
     conn = _get_pg_conn()
     if not conn:
         return
+    user_args = (
+        user["id"],
+        user["email"],
+        user.get("provider") or "google",
+        user.get("registeredAt") or None,
+        user.get("lastLoginAt") or None,
+    )
+    usage_args = (
+        user["id"],
+        data.get("event_type") or "GENERATE_REPLY",
+        data.get("model") or None,
+    )
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at, plan_ends_at)
-                VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW(),
-                    (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC')
-                ON CONFLICT (id) DO UPDATE SET
-                    email = EXCLUDED.email,
-                    provider = EXCLUDED.provider,
-                    last_login_at = EXCLUDED.last_login_at,
-                    updated_at = NOW(),
-                    plan_ends_at = CASE
-                        WHEN COALESCE(trim(lower(users.plan)), 'free') = 'free'
-                        THEN (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'
-                        ELSE users.plan_ends_at
-                    END
-                """,
-                (
-                    user["id"],
-                    user["email"],
-                    user.get("provider") or "google",
-                    user.get("registeredAt") or None,
-                    user.get("lastLoginAt") or None,
-                ),
-            )
+            # Prefer full upsert with plan_ends_at (roadmap: plan end, days remaining in view).
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at, plan_ends_at)
+                    VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW(),
+                        (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC')
+                    ON CONFLICT (id) DO UPDATE SET
+                        email = EXCLUDED.email,
+                        provider = EXCLUDED.provider,
+                        last_login_at = EXCLUDED.last_login_at,
+                        updated_at = NOW(),
+                        plan_ends_at = CASE
+                            WHEN COALESCE(trim(lower(users.plan)), 'free') = 'free'
+                            THEN (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'
+                            ELSE users.plan_ends_at
+                        END
+                    """,
+                    user_args,
+                )
+            except Exception as col_err:
+                # Column plan_ends_at may not exist yet; fall back to basic upsert.
+                err_code = getattr(col_err, "pgcode", None)
+                if err_code == "42703":
+                    cur.execute(
+                        """
+                        INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at)
+                        VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW())
+                        ON CONFLICT (id) DO UPDATE SET
+                            email = EXCLUDED.email,
+                            provider = EXCLUDED.provider,
+                            last_login_at = EXCLUDED.last_login_at,
+                            updated_at = NOW()
+                        """,
+                        user_args,
+                    )
+                    # If table has plan_expires_at instead, set it to end of month for free plan
+                    try:
+                        cur.execute(
+                            """
+                            UPDATE users SET plan_expires_at = (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'
+                            WHERE id::text = %s AND (plan IS NULL OR lower(trim(COALESCE(plan, ''))) = 'free')
+                            """,
+                            (user["id"],),
+                        )
+                    except Exception:
+                        pass
+                else:
+                    raise
             cur.execute(
                 """
                 INSERT INTO usage_events (user_id, event_type, model, created_at)
                 VALUES (%s, %s, %s, NOW())
                 """,
-                (
-                    user["id"],
-                    data.get("event_type") or "GENERATE_REPLY",
-                    data.get("model") or None,
-                ),
+                usage_args,
             )
+            # Keep used_credits_current_month in sync (no trigger required)
+            try:
+                cur.execute(
+                    """
+                    UPDATE users SET used_credits_current_month = COALESCE((
+                        SELECT SUM(CASE ev.event_type
+                            WHEN 'GENERATE_REPLY' THEN 40
+                            WHEN 'SUMMARY' THEN 40
+                            WHEN 'GENERATE_REPLY_MULTI' THEN 40
+                            WHEN 'PLAY_VOICE' THEN 50
+                            WHEN 'RECORD_VOICE' THEN 50
+                            ELSE 0
+                        END)::int
+                        FROM usage_events ev
+                        WHERE ev.user_id::text = users.id::text
+                          AND ev.created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC')
+                    ), 0)
+                    WHERE users.id::text = %s
+                    """,
+                    (user["id"],),
+                )
+            except Exception as upd_err:
+                if getattr(upd_err, "pgcode", None) != "42703":
+                    raise
         conn.commit()
     except Exception as e:
         app.logger.exception("Track user/usage error: %s", e)
@@ -287,6 +346,10 @@ def generate():
             "o4-mini": "o1-mini",
         }
         model = _model_alias.get(raw_model, raw_model)
+        # Gemini: 1.5 names often 404 on v1beta; use 2.0-flash as supported default
+        if model.lower().startswith("gemini"):
+            _gemini_alias = {"gemini-1.5-flash": "gemini-2.0-flash", "gemini-1.5-pro": "gemini-2.0-flash", "gemini-1.5-flash-latest": "gemini-2.0-flash", "gemini-1.5-pro-latest": "gemini-2.0-flash"}
+            model = _gemini_alias.get(model.lower(), model)
         model_lower = model.lower()
 
         # Decide provider from model id prefix
@@ -310,17 +373,18 @@ def generate():
         ]
 
         # Helper: call OpenAI/DeepSeek style chat-completions endpoint
-        def call_chat_completions(base_url: str, api_key: str):
+        def call_chat_completions(base_url: str, api_key: str, prov: str):
             payload = {
                 "model": model,
                 "messages": messages,
                 "max_tokens": data.get("max_tokens", 400),
             }
-            # Support multiple completions
-            if data.get("n"):
-                payload["n"] = int(data.get("n"))
-            elif data.get("multi"):
-                payload["n"] = 2
+            n_val = int(data.get("n")) if data.get("n") else (2 if data.get("multi") else 1)
+            # DeepSeek only supports n=1
+            if prov == "deepseek" and n_val > 1:
+                n_val = 1
+            if n_val > 1:
+                payload["n"] = n_val
 
             max_retries = 3
             backoff_base = 1.0
@@ -395,7 +459,7 @@ def generate():
         if provider in ("openai", "deepseek"):
             base_url = "https://api.openai.com" if provider == "openai" else "https://api.deepseek.com"
             api_key = OPENAI_API_KEY if provider == "openai" else DEEPSEEK_API_KEY
-            resp, err = call_chat_completions(base_url, api_key)
+            resp, err = call_chat_completions(base_url, api_key, provider)
         else:
             resp, err = call_gemini_generate()
 
