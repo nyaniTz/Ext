@@ -153,13 +153,19 @@ def track_user_and_usage(data):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at)
-                VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW())
+                INSERT INTO users (id, email, provider, registered_at, last_login_at, updated_at, plan_ends_at)
+                VALUES (%s, %s, %s, %s::timestamptz, %s::timestamptz, NOW(),
+                    (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC')
                 ON CONFLICT (id) DO UPDATE SET
                     email = EXCLUDED.email,
                     provider = EXCLUDED.provider,
                     last_login_at = EXCLUDED.last_login_at,
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    plan_ends_at = CASE
+                        WHEN COALESCE(trim(lower(users.plan)), 'free') = 'free'
+                        THEN (date_trunc('month', NOW() AT TIME ZONE 'UTC') + interval '1 month' - interval '1 second') AT TIME ZONE 'UTC'
+                        ELSE users.plan_ends_at
+                    END
                 """,
                 (
                     user["id"],
@@ -255,6 +261,7 @@ def generate():
         data = request.get_json() or {}
         user = data.get("user") if isinstance(data.get("user"), dict) else None
         user_id = user.get("id") if user else None
+        used_credits, quota = 0, 1000
 
         # Quota check: 40 credits per text/summary reply. Do not count this request if over quota.
         if user_id:
@@ -446,8 +453,13 @@ def generate():
         # Record usage only on successful reply (40 credits per text/summary)
         if user_id and (reply or replies):
             track_user_and_usage(data)
+            used_credits += CREDITS_REPLY
 
-        return jsonify({"raw": result, "reply": reply, "replies": replies, "provider": provider, "model": model})
+        out = {"raw": result, "reply": reply, "replies": replies, "provider": provider, "model": model}
+        if user_id:
+            out["used"] = used_credits
+            out["quota"] = quota
+        return jsonify(out)
         
     except Exception as e:
         app.logger.exception("proxy error in /generate")
