@@ -324,6 +324,219 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
+@app.route("/billing", methods=["GET"])
+def billing_page():
+    """
+    Simple hosted billing page.
+    This does NOT change any API behavior used by the extension – it is an optional
+    page you can visit directly in the browser for testing or manual upgrades.
+    """
+    return """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Subscribe to Cursor Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        background: #f3f4f6;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        color: #111827;
+      }
+      .card {
+        background: #ffffff;
+        border-radius: 16px;
+        box-shadow: 0 18px 45px rgba(15,23,42,0.18);
+        padding: 20px 22px 18px;
+        max-width: 720px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .sub {
+        font-size: 13px;
+        color: #4b5563;
+        margin-bottom: 16px;
+      }
+      .columns {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        align-items: flex-start;
+      }
+      .left, .right {
+        flex: 1 1 260px;
+      }
+      .price-main {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .price-unit {
+        font-size: 12px;
+        color: #6b7280;
+        margin-left: 6px;
+      }
+      .fx-note {
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 4px;
+        margin-bottom: 12px;
+      }
+      .box {
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+      }
+      .box-title {
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .box-text {
+        font-size: 12px;
+        color: #4b5563;
+        margin-bottom: 6px;
+      }
+      .billing-line {
+        font-size: 12px;
+        color: #4b5563;
+      }
+      .total-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px solid #e5e7eb;
+      }
+      .total-label {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .total-value {
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .pay-btn {
+        width: 100%;
+        margin-top: 12px;
+        padding: 9px 10px;
+        border-radius: 999px;
+        border: none;
+        background: #111827;
+        color: #ffffff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .pay-btn:hover {
+        transform: scale(0.97);
+      }
+      .right label {
+        display: block;
+        font-size: 11px;
+        margin-bottom: 2px;
+      }
+      .right input {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid #d1d5db;
+        font-size: 13px;
+        box-sizing: border-box;
+        margin-bottom: 8px;
+      }
+      .note {
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 6px;
+      }
+      @media (max-width: 640px) {
+        .card { border-radius: 0; box-shadow: none; height: 100vh; max-height: 100vh; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="header">
+        <div class="title">Subscribe to Cursor Pro</div>
+      </div>
+      <div class="sub">This standalone page is for testing Stripe Checkout. In normal use, the extension opens Stripe directly.</div>
+      <div class="columns">
+        <div class="left">
+          <div>
+            <span class="price-main">$10</span>
+            <span class="price-unit">per month · cancel anytime · USD</span>
+          </div>
+          <div class="fx-note">Exchange rate and fees of your bank may apply.</div>
+          <div class="box">
+            <div class="box-title">Cursor Pro</div>
+            <div class="box-text">
+              Cursor Pro unlocks unlimited tab completions, extended agent limits, and access to most features.
+            </div>
+            <div class="billing-line">Billed monthly · $10.00 per month</div>
+          </div>
+          <div class="total-row">
+            <div class="total-label">Total due today</div>
+            <div class="total-value">$10.00</div>
+          </div>
+        </div>
+        <div class="right">
+          <label>Email</label>
+          <input id="email" type="email" placeholder="you@example.com">
+          <button id="pay" class="pay-btn">Pay $10.00 with Stripe</button>
+          <div class="note">Card details are processed securely by Stripe on the checkout page.</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      document.getElementById('pay').addEventListener('click', function () {
+        const email = document.getElementById('email').value || '';
+        fetch('/create-checkout-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerEmail: email,
+            billingMode: 'monthly',
+            customAmountUsd: 10
+          })
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.url) {
+            window.location.href = data.url;
+          } else {
+            alert('Failed to start checkout.');
+          }
+        })
+        .catch(() => {
+          alert('Payment server error.');
+        });
+      });
+    </script>
+  </body>
+</html>
+    """
+
+
 @app.route("/create-checkout-session", methods=["POST"])
 @limiter.limit("10 per minute")
 def create_checkout_session():
