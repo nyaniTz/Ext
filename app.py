@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify
 import requests
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import stripe
 
 load_dotenv()
 
@@ -294,6 +295,10 @@ limiter = Limiter(
     storage_uri=storage_uri,
 )
 
+# Stripe configuration (secret key from environment; DO NOT hardcode)
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY") or ""
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY") or ""
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEYs")  # Note: keeping your var name
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -317,6 +322,67 @@ def index():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "healthy"}), 200
+
+
+@app.route("/create-checkout-session", methods=["POST"])
+@limiter.limit("10 per minute")
+def create_checkout_session():
+    """
+    Create a Stripe Checkout session for Cursor Pro.
+    Expects JSON body: { customerEmail, billingMode: 'monthly'|'annual', customAmountUsd? }
+    """
+    try:
+        if not stripe.api_key:
+            return jsonify({"error": "stripe_not_configured"}), 500
+
+        data = request.get_json(force=True) or {}
+        email = data.get("customerEmail")
+        billing_mode = data.get("billingMode") or "monthly"
+        custom_amount = data.get("customAmountUsd")
+
+        # Decide amount in USD
+        monthly_price = 10.0
+        annual_monthly_price = 7.0
+        annual_total = annual_monthly_price * 12.0  # 84
+
+        try:
+            if custom_amount is not None and str(custom_amount).strip() != "":
+                amount_usd = float(custom_amount)
+            elif billing_mode == "annual":
+                amount_usd = annual_total
+            else:
+                amount_usd = monthly_price
+        except Exception:
+            amount_usd = monthly_price
+
+        if amount_usd < 5.0:
+            return jsonify({"error": "amount_too_low", "message": "Minimum amount is $5"}), 400
+
+        interval = "year" if billing_mode == "annual" else "month"
+
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            customer_email=email or None,
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": "Cursor Pro"},
+                        "unit_amount": int(round(amount_usd * 100)),
+                        "recurring": {"interval": interval},
+                    },
+                    "quantity": 1,
+                }
+            ],
+            success_url=os.getenv("STRIPE_SUCCESS_URL", "https://example.com/stripe-success")
+            + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=os.getenv("STRIPE_CANCEL_URL", "https://example.com/stripe-cancel"),
+        )
+
+        return jsonify({"url": session.url})
+    except Exception as e:
+        app.logger.exception("Stripe checkout error")
+        return jsonify({"error": "stripe_error", "message": str(e)}), 500
 
 
 @app.route("/generate", methods=["POST"])
