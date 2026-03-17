@@ -385,6 +385,143 @@ def create_checkout_session():
         return jsonify({"error": "stripe_error", "message": str(e)}), 500
 
 
+def _set_user_plan_by_email(email: str, plan: str = "pro", customer_id: str | None = None, plan_ends_at_ts: int | None = None):
+    """Update users table to mark user as paid/pro. No-op if DB not configured."""
+    if not email:
+        return
+    conn = _get_pg_conn()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            if plan_ends_at_ts:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET plan = %s,
+                        is_blocked = FALSE,
+                        payment_customer_id = COALESCE(%s, payment_customer_id),
+                        plan_ends_at = to_timestamp(%s),
+                        plan_expires_at = to_timestamp(%s),
+                        updated_at = NOW()
+                    WHERE lower(email) = lower(%s)
+                    """,
+                    (plan, customer_id, int(plan_ends_at_ts), int(plan_ends_at_ts), email),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE users
+                    SET plan = %s,
+                        is_blocked = FALSE,
+                        payment_customer_id = COALESCE(%s, payment_customer_id),
+                        updated_at = NOW()
+                    WHERE lower(email) = lower(%s)
+                    """,
+                    (plan, customer_id, email),
+                )
+            conn.commit()
+    except Exception as e:
+        app.logger.warning("Failed to set user plan: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook():
+    """
+    Stripe webhook endpoint. Configure STRIPE_WEBHOOK_SECRET in env and add this URL in Stripe dashboard.
+    On successful payment, mark user as pro in DB (users.plan = 'pro').
+    """
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET") or ""
+    if not webhook_secret:
+        return jsonify({"error": "webhook_not_configured"}), 500
+
+    payload = request.data
+    sig_header = request.headers.get("Stripe-Signature")
+    try:
+        event = stripe.Webhook.construct_event(payload=payload, sig_header=sig_header, secret=webhook_secret)
+    except Exception as e:
+        app.logger.warning("Stripe webhook signature verification failed: %s", e)
+        return jsonify({"error": "invalid_signature"}), 400
+
+    event_type = (event.get("type") or "").strip()
+    obj = event.get("data", {}).get("object", {}) if isinstance(event.get("data"), dict) else {}
+
+    try:
+        # Checkout completed (subscription created)
+        if event_type == "checkout.session.completed":
+            email = obj.get("customer_details", {}).get("email") or obj.get("customer_email")
+            customer_id = obj.get("customer")
+            # If subscription exists, fetch period end to set plan end date
+            sub_id = obj.get("subscription")
+            plan_end_ts = None
+            try:
+                if sub_id and stripe.api_key:
+                    sub = stripe.Subscription.retrieve(sub_id)
+                    plan_end_ts = sub.get("current_period_end")
+            except Exception:
+                plan_end_ts = None
+            _set_user_plan_by_email(email=email, plan="pro", customer_id=customer_id, plan_ends_at_ts=plan_end_ts)
+
+        # Subscription renewed / paid invoice
+        elif event_type == "invoice.paid":
+            email = obj.get("customer_email")
+            customer_id = obj.get("customer")
+            sub_id = obj.get("subscription")
+            plan_end_ts = None
+            try:
+                if sub_id and stripe.api_key:
+                    sub = stripe.Subscription.retrieve(sub_id)
+                    plan_end_ts = sub.get("current_period_end")
+            except Exception:
+                plan_end_ts = None
+            _set_user_plan_by_email(email=email, plan="pro", customer_id=customer_id, plan_ends_at_ts=plan_end_ts)
+
+        # Subscription cancelled → downgrade to free
+        elif event_type == "customer.subscription.deleted":
+            customer_id = obj.get("customer")
+            # best-effort: if we have customer_id, try to downgrade by customer_id
+            conn = _get_pg_conn()
+            if conn and customer_id:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE users
+                            SET plan = 'free',
+                                updated_at = NOW()
+                            WHERE payment_customer_id = %s
+                            """,
+                            (customer_id,),
+                        )
+                        conn.commit()
+                except Exception as e:
+                    app.logger.warning("Failed to downgrade user on subscription deleted: %s", e)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        app.logger.exception("Stripe webhook handler error: %s", e)
+        return jsonify({"error": "webhook_handler_error"}), 500
+
+    return jsonify({"received": True}), 200
+
+
 @app.route("/generate", methods=["POST"])
 @limiter.limit("60 per minute")
 def generate():
