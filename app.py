@@ -39,6 +39,61 @@ FREE_VOICE_PLAY_LIMIT = 2
 FREE_VOICE_RECORD_LIMIT = 2
 
 
+def _voice_limits_from_monthly_quota(monthly_quota: int):
+    """
+    Map paid tier monthly_quota → voice limits.
+    Assumes:
+      - $5 tier → monthly_quota = 2500 → 30 plays/records
+      - $10 tier → monthly_quota = 6000 → 120 plays/records
+    """
+    try:
+        q = int(monthly_quota)
+    except Exception:
+        q = 1000
+
+    # Unlimited credits tier (if any)
+    if q < 0:
+        return 120, 120
+
+    if q >= 6000:
+        return 120, 120
+    if q >= 2500:
+        return 30, 30
+    return FREE_VOICE_PLAY_LIMIT, FREE_VOICE_RECORD_LIMIT
+
+
+def _infer_monthly_quota_from_subscription_price_cents(unit_amount_cents: int | None, interval: str | None):
+    """
+    Map Stripe subscription price → our monthly_quota.
+      - $5/month  -> 2500 credits
+      - $10/month -> 6000 credits
+    For yearly prices, we assume the monthly equivalent and map to the same tiers.
+    """
+    if not unit_amount_cents:
+        return None
+
+    interval_norm = (interval or "").strip().lower()
+    monthly_equiv_usd = None
+
+    try:
+        usd = float(unit_amount_cents) / 100.0
+        if interval_norm == "month":
+            monthly_equiv_usd = usd
+        elif interval_norm == "year":
+            monthly_equiv_usd = usd / 12.0
+    except Exception:
+        return None
+
+    if monthly_equiv_usd is None:
+        return None
+
+    # Tier mapping by monthly equivalent
+    # Using thresholds keeps this robust to minor price formatting differences.
+    if monthly_equiv_usd < 7.0:
+        return 2500
+    return 6000
+
+
 def _credits_sql():
     """SQL expression: sum of credits for events this UTC month."""
     return """
@@ -88,7 +143,8 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         quota = int(monthly_quota or 1000)
         if is_blocked:
             return False, 0, quota, 0, 0
-        is_paid = plan and plan.lower() in ("vip", "paid", "pro")
+        # Compute voice limits from monthly_quota, not from "is_paid".
+        voice_play_limit, voice_record_limit = _voice_limits_from_monthly_quota(int(monthly_quota or 1000))
         month_start = "date_trunc('month', NOW() AT TIME ZONE 'UTC')"
         with conn.cursor() as cur:
             cur.execute(
@@ -121,8 +177,8 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
             allowed_quota = True
         else:
             allowed_quota = (used_credits + required_credits) <= quota
-        allowed_play = is_paid or voice_plays_used < FREE_VOICE_PLAY_LIMIT
-        allowed_record = is_paid or voice_records_used < FREE_VOICE_RECORD_LIMIT
+        allowed_play = voice_plays_used < voice_play_limit
+        allowed_record = voice_records_used < voice_record_limit
         if for_voice_play:
             allowed = allowed_quota and allowed_play
         elif for_voice_record:
@@ -385,7 +441,13 @@ def create_checkout_session():
         return jsonify({"error": "stripe_error", "message": str(e)}), 500
 
 
-def _set_user_plan_by_email(email: str, plan: str = "pro", customer_id: str | None = None, plan_ends_at_ts: int | None = None):
+def _set_user_plan_by_email(
+    email: str,
+    plan: str = "pro",
+    customer_id: str | None = None,
+    plan_ends_at_ts: int | None = None,
+    monthly_quota: int | None = None,
+):
     """Update users table to mark user as paid/pro. No-op if DB not configured."""
     if not email:
         return
@@ -403,10 +465,11 @@ def _set_user_plan_by_email(email: str, plan: str = "pro", customer_id: str | No
                         payment_customer_id = COALESCE(%s, payment_customer_id),
                         plan_ends_at = to_timestamp(%s),
                         plan_expires_at = to_timestamp(%s),
+                        monthly_quota = COALESCE(%s, monthly_quota),
                         updated_at = NOW()
                     WHERE lower(email) = lower(%s)
                     """,
-                    (plan, customer_id, int(plan_ends_at_ts), int(plan_ends_at_ts), email),
+                    (plan, customer_id, int(plan_ends_at_ts), int(plan_ends_at_ts), monthly_quota, email),
                 )
             else:
                 cur.execute(
@@ -415,10 +478,11 @@ def _set_user_plan_by_email(email: str, plan: str = "pro", customer_id: str | No
                     SET plan = %s,
                         is_blocked = FALSE,
                         payment_customer_id = COALESCE(%s, payment_customer_id),
+                        monthly_quota = COALESCE(%s, monthly_quota),
                         updated_at = NOW()
                     WHERE lower(email) = lower(%s)
                     """,
-                    (plan, customer_id, email),
+                    (plan, customer_id, monthly_quota, email),
                 )
             conn.commit()
     except Exception as e:
@@ -463,13 +527,38 @@ def stripe_webhook():
             # If subscription exists, fetch period end to set plan end date
             sub_id = obj.get("subscription")
             plan_end_ts = None
+            monthly_quota = None
             try:
                 if sub_id and stripe.api_key:
-                    sub = stripe.Subscription.retrieve(sub_id)
+                    # Expand price so we can infer whether this is $5/month or $10/month.
+                    sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
                     plan_end_ts = sub.get("current_period_end")
+                    items = (sub.get("items") or {}).get("data") or []
+                    if items:
+                        price = (items[0] or {}).get("price") or {}
+                        unit_amount = price.get("unit_amount")
+                        recurring = price.get("recurring") or {}
+                        interval = recurring.get("interval")
+                        monthly_quota = _infer_monthly_quota_from_subscription_price_cents(unit_amount, interval)
             except Exception:
                 plan_end_ts = None
-            _set_user_plan_by_email(email=email, plan="pro", customer_id=customer_id, plan_ends_at_ts=plan_end_ts)
+            # Fallback: best-effort inference from total amount (cents).
+            if monthly_quota is None:
+                try:
+                    amount_total_cents = obj.get("amount_total")
+                    if amount_total_cents:
+                        amount_usd = float(amount_total_cents) / 100.0
+                        # $5/mo is ~5, $10/mo is ~10, annual plans are much higher but still map to 6000.
+                        monthly_quota = 2500 if amount_usd <= 6.0 else 6000
+                except Exception:
+                    monthly_quota = None
+            _set_user_plan_by_email(
+                email=email,
+                plan="pro",
+                customer_id=customer_id,
+                plan_ends_at_ts=plan_end_ts,
+                monthly_quota=monthly_quota if monthly_quota is not None else 6000,
+            )
 
         # Subscription renewed / paid invoice
         elif event_type == "invoice.paid":
@@ -477,13 +566,36 @@ def stripe_webhook():
             customer_id = obj.get("customer")
             sub_id = obj.get("subscription")
             plan_end_ts = None
+            monthly_quota = None
             try:
                 if sub_id and stripe.api_key:
-                    sub = stripe.Subscription.retrieve(sub_id)
+                    sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
                     plan_end_ts = sub.get("current_period_end")
+                    items = (sub.get("items") or {}).get("data") or []
+                    if items:
+                        price = (items[0] or {}).get("price") or {}
+                        unit_amount = price.get("unit_amount")
+                        recurring = price.get("recurring") or {}
+                        interval = recurring.get("interval")
+                        monthly_quota = _infer_monthly_quota_from_subscription_price_cents(unit_amount, interval)
             except Exception:
                 plan_end_ts = None
-            _set_user_plan_by_email(email=email, plan="pro", customer_id=customer_id, plan_ends_at_ts=plan_end_ts)
+            if monthly_quota is None:
+                try:
+                    # Invoice totals are in cents; we only care about detecting ~$5 vs ~$10 tiers.
+                    amount_total_cents = obj.get("amount_paid") or obj.get("amount_due") or obj.get("total")
+                    if amount_total_cents:
+                        amount_usd = float(amount_total_cents) / 100.0
+                        monthly_quota = 2500 if amount_usd <= 6.0 else 6000
+                except Exception:
+                    monthly_quota = None
+            _set_user_plan_by_email(
+                email=email,
+                plan="pro",
+                customer_id=customer_id,
+                plan_ends_at_ts=plan_end_ts,
+                monthly_quota=monthly_quota if monthly_quota is not None else 6000,
+            )
 
         # Subscription cancelled → downgrade to free
         elif event_type == "customer.subscription.deleted":
@@ -497,6 +609,7 @@ def stripe_webhook():
                             """
                             UPDATE users
                             SET plan = 'free',
+                                monthly_quota = 1000,
                                 updated_at = NOW()
                             WHERE payment_customer_id = %s
                             """,
@@ -773,13 +886,14 @@ def transcribe():
                 user_id, required_credits=CREDITS_RECORD_VOICE, for_voice_record=True, user_email=user.get("email")
             )
             if not allowed:
+                _, voice_record_limit = _voice_limits_from_monthly_quota(quota)
                 return jsonify({
-                    "error": "voice_record_locked" if voice_records_used >= FREE_VOICE_RECORD_LIMIT else "quota_exceeded",
+                    "error": "voice_record_locked" if voice_records_used >= voice_record_limit else "quota_exceeded",
                     "message": "Upgrade your plan to unlock this feature.",
                     "used": used_credits,
                     "quota": quota,
                     "voice_records_used": voice_records_used,
-                    "voice_records_limit": FREE_VOICE_RECORD_LIMIT,
+                    "voice_records_limit": voice_record_limit,
                 }), 200
 
         # Decode base64 audio
@@ -864,13 +978,14 @@ def speak():
                 user_id, required_credits=CREDITS_PLAY_VOICE, for_voice_play=True, user_email=user.get("email")
             )
             if not allowed:
+                voice_play_limit, _voice_record_limit = _voice_limits_from_monthly_quota(quota)
                 return jsonify({
-                    "error": "voice_play_locked" if voice_plays_used >= FREE_VOICE_PLAY_LIMIT else "quota_exceeded",
+                    "error": "voice_play_locked" if voice_plays_used >= voice_play_limit else "quota_exceeded",
                     "message": "Upgrade your plan to unlock this feature.",
                     "used": used_credits,
                     "quota": quota,
                     "voice_plays_used": voice_plays_used,
-                    "voice_plays_limit": FREE_VOICE_PLAY_LIMIT,
+                    "voice_plays_limit": voice_play_limit,
                 }), 200
 
         app.logger.info("TTS /speak called, model=%s voice=%s text_len=%d", model, voice, len(text))
