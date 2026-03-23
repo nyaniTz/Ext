@@ -914,6 +914,38 @@ def speak():
         return jsonify({"error": "proxy-error", "details": str(e)}), 500
 
 
+@app.route("/pricing", methods=["GET"])
+def pricing_page():
+    """Hosted Stripe pricing table page for extension upgrade flow."""
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Email Assistance Pricing</title>
+  <script async src="https://js.stripe.com/v3/pricing-table.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f7f8fb; color: #111; }
+    .wrap { max-width: 1100px; margin: 32px auto; padding: 0 16px; }
+    h1 { margin: 0 0 8px; color: #092541; }
+    p { margin: 0 0 20px; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>AI Email Assistance Plans</h1>
+    <p>Choose a plan to unlock higher credits and premium features.</p>
+    <stripe-pricing-table
+      pricing-table-id="prctbl_1TE3674ADvMqqrFJSEBcdyof"
+      publishable-key="pk_live_51TBUzD4ADvMqqrFJRA8R2HX29Pn1BiZvaWAC6n6CKqhHtXapM8ZambBr2D0OtivBmNA8lElF0ZbeOGgOzkugXRSx00gRKVcfOM">
+    </stripe-pricing-table>
+  </div>
+</body>
+</html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
