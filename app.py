@@ -1061,6 +1061,69 @@ def pricing_page():
     """, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+@app.route("/terms", methods=["GET"])
+def terms_page():
+    """Hosted Terms of Use page for extension footer links."""
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Email Assistance - Terms of Use</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fb; color: #1f2937; line-height: 1.6; }
+    .wrap { max-width: 900px; margin: 28px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { padding: 18px 22px; background: #092541; color: #fff; }
+    .header h1 { margin: 0; font-size: 20px; font-weight: 700; }
+    .content { padding: 22px; }
+    h2 { margin: 18px 0 8px; font-size: 16px; color: #092541; }
+    p { margin: 8px 0; font-size: 14px; }
+    ul { margin: 8px 0 8px 20px; padding: 0; font-size: 14px; }
+    .muted { color: #6b7280; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>AI Email Assistance - Terms of Use</h1>
+    </div>
+    <div class="content">
+      <p class="muted">Effective date: February 25, 2026</p>
+      <h2>1. Acceptance</h2>
+      <p>By using AI Email Assistance, you agree to these Terms of Use.</p>
+      <h2>2. Service Scope</h2>
+      <p>The extension provides AI-powered email drafting, summarization, translation, voice features, and related productivity tools.</p>
+      <h2>3. Account and Access</h2>
+      <ul>
+        <li>Sign-in is required for AI features and quota tracking.</li>
+        <li>You are responsible for account activity under your signed-in email.</li>
+      </ul>
+      <h2>4. Plans and Quotas</h2>
+      <ul>
+        <li>Free and paid plans include different credit and voice limits.</li>
+        <li>Limits may reset monthly and can change with plan updates.</li>
+      </ul>
+      <h2>5. Acceptable Use</h2>
+      <ul>
+        <li>Do not use the service for illegal activity, fraud, spam, or abuse.</li>
+        <li>Do not attempt to bypass usage limits or payment controls.</li>
+      </ul>
+      <h2>6. AI Output Disclaimer</h2>
+      <p>AI-generated responses may be inaccurate. You are responsible for reviewing content before sending.</p>
+      <h2>7. Privacy</h2>
+      <p>We process only data needed to provide the service, such as account identifiers, usage events, and feature requests.</p>
+      <h2>8. Changes</h2>
+      <p>These terms may be updated over time. Continued use means you accept the updated terms.</p>
+      <h2>9. Contact</h2>
+      <p>For support or questions, contact the AI Email Assistance team through the extension support channel.</p>
+    </div>
+  </div>
+</body>
+</html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
