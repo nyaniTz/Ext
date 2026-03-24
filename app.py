@@ -1072,51 +1072,92 @@ def terms_page():
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI Email Assistance - Terms of Use</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fb; color: #1f2937; line-height: 1.6; }
-    .wrap { max-width: 900px; margin: 28px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
-    .header { padding: 18px 22px; background: #092541; color: #fff; }
-    .header h1 { margin: 0; font-size: 20px; font-weight: 700; }
-    .content { padding: 22px; }
-    h2 { margin: 18px 0 8px; font-size: 16px; color: #092541; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fb; color: #1f2937; line-height: 1.62; }
+    .wrap { max-width: 980px; margin: 28px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { padding: 20px 24px; background: #092541; color: #fff; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .header p { margin: 6px 0 0; font-size: 13px; color: rgba(255,255,255,0.86); }
+    .content { padding: 24px; }
+    h2 { margin: 22px 0 10px; font-size: 17px; color: #092541; }
     p { margin: 8px 0; font-size: 14px; }
     ul { margin: 8px 0 8px 20px; padding: 0; font-size: 14px; }
+    li { margin: 6px 0; }
     .muted { color: #6b7280; font-size: 13px; }
+    .contact { margin-top: 24px; padding: 12px 14px; background: #f3f7fc; border: 1px solid #d9e8fb; border-radius: 10px; }
+    .contact a { color: #092541; font-weight: 700; text-decoration: none; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
       <h1>AI Email Assistance - Terms of Use</h1>
+      <p>Last updated: October 09, 2025</p>
     </div>
     <div class="content">
-      <p class="muted">Effective date: February 25, 2026</p>
-      <h2>1. Acceptance</h2>
-      <p>By using AI Email Assistance, you agree to these Terms of Use.</p>
-      <h2>2. Service Scope</h2>
-      <p>The extension provides AI-powered email drafting, summarization, translation, voice features, and related productivity tools.</p>
-      <h2>3. Account and Access</h2>
+      <h2>AGREEMENT TO TERMS</h2>
+      <p>These Terms of Use form a legally binding agreement between you (personally or on behalf of an entity) and AI Email Assistance ("Company", "we", "us", or "our"), regarding your access to and use of our extension, hosted pages, and related services (collectively, the "Service"). By accessing or using the Service, you confirm that you have read, understood, and agree to be bound by these Terms of Use.</p>
+      <p>IF YOU DO NOT AGREE TO ALL OF THESE TERMS, YOU MUST NOT USE THE SERVICE.</p>
+      <p>We may update these Terms from time to time for legal, security, or product reasons. Updated terms become effective when published on this page, and your continued use of the Service means you accept the updated terms.</p>
+      <p>The Service is intended for users who are at least 13 years old. If you are under 18, you must use the Service under parent/guardian permission and supervision.</p>
+
+      <h2>INTELLECTUAL PROPERTY RIGHTS</h2>
+      <p>Unless stated otherwise, all software, design, UI, prompts, content, logos, features, and related materials in the Service are owned by us or licensed to us, and are protected by applicable intellectual property laws.</p>
+      <p>We grant you a limited, non-exclusive, revocable, non-transferable license to access and use the Service for personal or internal business use only. You may not copy, sell, sublicense, reverse engineer, decompile, scrape, or exploit any part of the Service without our prior written consent.</p>
+
+      <h2>USER REPRESENTATIONS</h2>
+      <p>By using the Service, you represent and warrant that:</p>
       <ul>
-        <li>Sign-in is required for AI features and quota tracking.</li>
-        <li>You are responsible for account activity under your signed-in email.</li>
+        <li>information you provide is accurate and current;</li>
+        <li>you have legal capacity to agree to these Terms;</li>
+        <li>you will not use bots or automation to abuse the Service;</li>
+        <li>you will not use the Service for unlawful, harmful, or deceptive activity;</li>
+        <li>your usage will comply with all applicable laws and regulations.</li>
       </ul>
-      <h2>4. Plans and Quotas</h2>
+
+      <h2>ACCOUNT, SIGN-IN, AND SECURITY</h2>
+      <p>Some features require Google sign-in. You are responsible for your account activity and for maintaining access security to your browser and email account. We may suspend or block accounts for abuse, fraud, or violations of these Terms.</p>
+
+      <h2>PLANS, PAYMENTS, AND USAGE LIMITS</h2>
+      <p>AI Email Assistance may offer free and paid plans. Credits, voice limits, and feature availability may vary by plan and may be updated over time.</p>
       <ul>
-        <li>Free and paid plans include different credit and voice limits.</li>
-        <li>Limits may reset monthly and can change with plan updates.</li>
+        <li>Free and paid tiers may include monthly quotas (e.g., AI credits, voice playback, and transcription limits).</li>
+        <li>Usage limits may reset periodically (typically monthly UTC cycles).</li>
+        <li>Payment processing is handled by third-party providers (e.g., Stripe), subject to their terms and policies.</li>
+        <li>If payment is disputed, reversed, or refunded for abuse reasons, we may adjust plan access.</li>
       </ul>
-      <h2>5. Acceptable Use</h2>
+
+      <h2>PROHIBITED USES AND LIMITATIONS</h2>
+      <p>You agree not to use the Service to:</p>
       <ul>
-        <li>Do not use the service for illegal activity, fraud, spam, or abuse.</li>
-        <li>Do not attempt to bypass usage limits or payment controls.</li>
+        <li>send spam, phishing, scams, malware, or fraudulent content;</li>
+        <li>generate illegal, hateful, threatening, or abusive communications;</li>
+        <li>request or distribute sensitive credentials (passwords, one-time codes, banking PINs, etc.);</li>
+        <li>impersonate others in a misleading or harmful way;</li>
+        <li>bypass quotas, billing controls, feature locks, or security protections;</li>
+        <li>attempt to disrupt, probe, or reverse engineer service infrastructure.</li>
       </ul>
-      <h2>6. AI Output Disclaimer</h2>
-      <p>AI-generated responses may be inaccurate. You are responsible for reviewing content before sending.</p>
-      <h2>7. Privacy</h2>
-      <p>We process only data needed to provide the service, such as account identifiers, usage events, and feature requests.</p>
-      <h2>8. Changes</h2>
-      <p>These terms may be updated over time. Continued use means you accept the updated terms.</p>
-      <h2>9. Contact</h2>
-      <p>For support or questions, contact the AI Email Assistance team through the extension support channel.</p>
+
+      <h2>AI OUTPUT DISCLAIMER</h2>
+      <p>AI-generated output may be incomplete, inaccurate, or unsuitable for your specific context. You are solely responsible for reviewing, editing, and approving all generated content before sending or relying on it.</p>
+
+      <h2>PRIVACY AND DATA HANDLING</h2>
+      <p>To operate the Service, we may process account identifiers, feature usage events, and request content needed to deliver AI functionality. By using the Service, you consent to this processing. Please avoid submitting highly sensitive or regulated data unless you are authorized and legally permitted to do so.</p>
+
+      <h2>SUSPENSION AND TERMINATION</h2>
+      <p>We may suspend, limit, or terminate access (with or without prior notice) for suspected abuse, security risk, legal compliance needs, non-payment, or violation of these Terms.</p>
+
+      <h2>DISCLAIMERS AND LIMITATION OF LIABILITY</h2>
+      <p>The Service is provided "as is" and "as available," without warranties of any kind, express or implied. To the maximum extent allowed by law, we are not liable for indirect, incidental, special, consequential, or punitive damages, or any loss of data, business, revenue, or reputation resulting from your use of the Service.</p>
+
+      <h2>GOVERNING LAW</h2>
+      <p>These Terms are governed by applicable laws in the jurisdiction where the Company operates, unless otherwise required by mandatory consumer law.</p>
+
+      <h2>CONTACT US</h2>
+      <div class="contact">
+        <p>For legal notices, support, or Terms questions, contact:</p>
+        <p><a href="mailto:aiemailassistance@gmail.com">aiemailassistance@gmail.com</a></p>
+      </div>
+      <p class="muted">By clicking "Connect with Google", you acknowledge and agree to these Terms of Use.</p>
     </div>
   </div>
 </body>
