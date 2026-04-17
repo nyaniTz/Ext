@@ -561,7 +561,9 @@ def stripe_webhook():
             )
 
         # Subscription renewed / paid invoice
-        elif event_type == "invoice.paid":
+        # Stripe commonly emits: "invoice.paid" and/or "invoice.payment_succeeded"
+        # Some dashboards/tools may show "invoice_payment.paid" naming — treat them equivalently.
+        elif event_type in ("invoice.paid", "invoice.payment_succeeded", "invoice_payment.paid"):
             email = obj.get("customer_email")
             customer_id = obj.get("customer")
             sub_id = obj.get("subscription")
@@ -649,10 +651,14 @@ def generate():
         user_id = user.get("id") if user else None
         used_credits, quota = 0, 1000
 
-        # Quota check: 40 credits per text/summary reply. Do not count this request if over quota.
+        event_type = (data.get("event_type") or "").strip().upper()
+        is_assistance = (event_type == "ASSISTANCE")
+        required_credits = 0 if is_assistance else CREDITS_REPLY
+
+        # Quota check (AI Assistance is free/no-credit by design).
         if user_id:
             allowed, used_credits, quota, _vp, _vr = check_quota(
-                user_id, required_credits=CREDITS_REPLY, user_email=user.get("email")
+                user_id, required_credits=required_credits, user_email=user.get("email")
             )
             if not allowed:
                 return jsonify({
@@ -1091,7 +1097,7 @@ def terms_page():
   <div class="wrap">
     <div class="header">
       <h1>AI Email Assistance - Terms of Use</h1>
-      <p>Last updated: October 09, 2025</p>
+      <p>Last updated: Apr 09, 2026</p>
     </div>
     <div class="content">
       <h2>AGREEMENT TO TERMS</h2>
