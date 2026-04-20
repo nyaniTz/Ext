@@ -132,14 +132,31 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         return True, 0, 1000, 0, 0
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT monthly_quota, plan, is_blocked FROM users WHERE id = %s",
-                (user_id,),
-            )
-            row = cur.fetchone()
+            # Prefer including usage_reset_at (added later). Fall back if column doesn't exist.
+            usage_reset_at = None
+            row = None
+            try:
+                cur.execute(
+                    "SELECT monthly_quota, plan, is_blocked, usage_reset_at FROM users WHERE id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if row and len(row) >= 4:
+                    usage_reset_at = row[3]
+            except Exception as col_err:
+                err_code = getattr(col_err, "pgcode", None)
+                # Undefined column
+                if err_code == "42703":
+                    cur.execute(
+                        "SELECT monthly_quota, plan, is_blocked FROM users WHERE id = %s",
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
+                else:
+                    raise
         if not row:
             return True, 0, 1000, 0, 0
-        monthly_quota, plan, is_blocked = row
+        monthly_quota, plan, is_blocked = row[0], row[1], row[2]
         quota = int(monthly_quota or 1000)
         if is_blocked:
             return False, 0, quota, 0, 0
@@ -155,7 +172,30 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                 """,
                 (user_id,),
             )
-            used_credits = int(cur.fetchone()[0] or 0)
+            used_credits_total = int(cur.fetchone()[0] or 0)
+
+            # If user upgraded mid-month, count "free" usage only up to 1000 before upgrade,
+            # then count usage after upgrade against paid quota.
+            used_credits_effective = used_credits_total
+            try:
+                if usage_reset_at and str(plan or "").strip().lower() != "free":
+                    # Only apply within the same UTC month.
+                    cur.execute(
+                        """
+                        SELECT """ + _credits_sql().strip() + """
+                        FROM usage_events
+                        WHERE user_id = %s AND created_at >= """ + month_start + """ AND created_at < %s
+                        """,
+                        (user_id, usage_reset_at),
+                    )
+                    used_before = int(cur.fetchone()[0] or 0)
+                    used_after = max(0, used_credits_total - used_before)
+                    used_credits_effective = min(used_before, 1000) + used_after
+                    # Bonus: remaining free quota + paid quota (paid quota is users.monthly_quota)
+                    quota = int(monthly_quota or 1000) + 1000
+            except Exception:
+                used_credits_effective = used_credits_total
+
             cur.execute(
                 """
                 SELECT COUNT(*) FROM usage_events
@@ -176,7 +216,7 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         if quota < 0:
             allowed_quota = True
         else:
-            allowed_quota = (used_credits + required_credits) <= quota
+            allowed_quota = (used_credits_effective + required_credits) <= quota
         allowed_play = voice_plays_used < voice_play_limit
         allowed_record = voice_records_used < voice_record_limit
         if for_voice_play:
@@ -185,7 +225,7 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
             allowed = allowed_quota and allowed_record
         else:
             allowed = allowed_quota
-        return allowed, used_credits, quota, voice_plays_used, voice_records_used
+        return allowed, used_credits_effective, quota, voice_plays_used, voice_records_used
     except Exception as e:
         app.logger.warning("Quota check failed: %s", e)
         return True, 0, 1000, 0, 0
@@ -454,12 +494,6 @@ def _set_user_plan_by_email(
     conn = _get_pg_conn()
     if not conn:
         return
-    # Bonus logic:
-    # - Paid plans are 2500 or 6000 credits/month.
-    # - When upgrading from Free, we also grant the remaining Free-plan credits for the month.
-    #   Implementation: increase monthly_quota by +1000 once at upgrade time (free quota).
-    #   This makes remaining credits = (paid_quota + 1000) - used_this_month.
-    FREE_MONTHLY_QUOTA_BONUS = 1000
     try:
         with conn.cursor() as cur:
             # Detect whether this is an upgrade from free → apply bonus only once.
@@ -476,13 +510,18 @@ def _set_user_plan_by_email(
             except Exception:
                 # If we cannot read previous plan (or user row doesn't exist yet), apply bonus.
                 apply_bonus = True
+            # When upgrading from free, set usage_reset_at if the column exists.
+            # This enables "remaining free quota + paid quota" accounting in check_quota.
+            if apply_bonus:
+                try:
+                    cur.execute(
+                        "UPDATE users SET usage_reset_at = NOW() WHERE lower(email) = lower(%s)",
+                        (email,),
+                    )
+                except Exception:
+                    pass
 
             effective_quota = monthly_quota
-            if effective_quota is not None and apply_bonus:
-                try:
-                    effective_quota = int(effective_quota) + FREE_MONTHLY_QUOTA_BONUS
-                except Exception:
-                    effective_quota = monthly_quota
 
             if plan_ends_at_ts:
                 cur.execute(
