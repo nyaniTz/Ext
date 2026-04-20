@@ -564,22 +564,45 @@ def stripe_webhook():
         # Stripe commonly emits: "invoice.paid" and/or "invoice.payment_succeeded"
         # Some dashboards/tools may show "invoice_payment.paid" naming — treat them equivalently.
         elif event_type in ("invoice.paid", "invoice.payment_succeeded", "invoice_payment.paid"):
+            # NOTE: Stripe Workbench may send invoice_payment objects here:
+            # { object: 'invoice_payment', invoice: 'in_...', ... }
+            # In that case we must fetch the invoice to get customer/subscription/email.
             email = obj.get("customer_email")
             customer_id = obj.get("customer")
             sub_id = obj.get("subscription")
             plan_end_ts = None
             monthly_quota = None
             try:
-                if sub_id and stripe.api_key:
-                    sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
-                    plan_end_ts = sub.get("current_period_end")
-                    items = (sub.get("items") or {}).get("data") or []
-                    if items:
-                        price = (items[0] or {}).get("price") or {}
-                        unit_amount = price.get("unit_amount")
-                        recurring = price.get("recurring") or {}
-                        interval = recurring.get("interval")
-                        monthly_quota = _infer_monthly_quota_from_subscription_price_cents(unit_amount, interval)
+                if stripe.api_key:
+                    inv_id = obj.get("invoice")
+                    if (not email or not customer_id or not sub_id) and inv_id:
+                        try:
+                            inv = stripe.Invoice.retrieve(inv_id, expand=["customer", "subscription"])
+                            if not customer_id:
+                                cust = inv.get("customer")
+                                customer_id = cust.get("id") if isinstance(cust, dict) else cust
+                            if not email:
+                                cust2 = inv.get("customer")
+                                if isinstance(cust2, dict) and cust2.get("email"):
+                                    email = cust2.get("email")
+                                else:
+                                    email = inv.get("customer_email") or inv.get("customer_details", {}).get("email")
+                            if not sub_id:
+                                sub = inv.get("subscription")
+                                sub_id = sub.get("id") if isinstance(sub, dict) else sub
+                        except Exception:
+                            pass
+
+                    if sub_id:
+                        sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
+                        plan_end_ts = sub.get("current_period_end")
+                        items = (sub.get("items") or {}).get("data") or []
+                        if items:
+                            price = (items[0] or {}).get("price") or {}
+                            unit_amount = price.get("unit_amount")
+                            recurring = price.get("recurring") or {}
+                            interval = recurring.get("interval")
+                            monthly_quota = _infer_monthly_quota_from_subscription_price_cents(unit_amount, interval)
             except Exception:
                 plan_end_ts = None
             if monthly_quota is None:
@@ -635,6 +658,104 @@ def stripe_webhook():
         return jsonify({"error": "webhook_handler_error"}), 500
 
     return jsonify({"received": True}), 200
+
+
+@app.route("/sync-plan", methods=["POST"])
+@limiter.limit("30 per minute")
+def sync_plan():
+    """
+    Manual plan sync helper (no webhook required).
+    Use this when a user paid BEFORE the webhook endpoint existed.
+
+    Body: { "email": "..."} OR { "user": { "email": "...", "id": "..." } }
+    Returns: { plan, monthly_quota, customer_id, plan_ends_at }
+    """
+    try:
+        auth_error = check_auth()
+        if auth_error:
+            return auth_error
+
+        if not stripe.api_key:
+            return jsonify({"error": "stripe_not_configured"}), 500
+
+        data = request.get_json(force=True) or {}
+        email = (data.get("email") or "").strip()
+        user = data.get("user") if isinstance(data.get("user"), dict) else None
+        if not email and user:
+            email = (user.get("email") or "").strip()
+        if not email:
+            return jsonify({"error": "missing_email"}), 400
+
+        # Find Stripe customer by email (best-effort).
+        customer_id = None
+        try:
+            # Customer.search is supported on modern Stripe API versions
+            res = stripe.Customer.search(query=f"email:'{email}'", limit=1)
+            if res and res.get("data"):
+                customer_id = (res["data"][0] or {}).get("id")
+        except Exception:
+            try:
+                # Fallback: list + filter
+                res2 = stripe.Customer.list(email=email, limit=1)
+                if res2 and res2.get("data"):
+                    customer_id = (res2["data"][0] or {}).get("id")
+            except Exception:
+                customer_id = None
+
+        if not customer_id:
+            return jsonify({"error": "stripe_customer_not_found"}), 200
+
+        # Get the most relevant active subscription.
+        sub = None
+        try:
+            subs = stripe.Subscription.list(customer=customer_id, status="all", limit=10, expand=["data.items.data.price"])
+            for s in (subs.get("data") or []):
+                st = (s.get("status") or "").lower()
+                if st in ("active", "trialing"):
+                    sub = s
+                    break
+            if not sub and (subs.get("data") or []):
+                sub = (subs.get("data") or [None])[0]
+        except Exception:
+            sub = None
+
+        if not sub:
+            return jsonify({"error": "stripe_subscription_not_found", "customer_id": customer_id}), 200
+
+        plan_end_ts = sub.get("current_period_end")
+        monthly_quota = None
+        try:
+            items = (sub.get("items") or {}).get("data") or []
+            if items:
+                price = (items[0] or {}).get("price") or {}
+                unit_amount = price.get("unit_amount")
+                recurring = price.get("recurring") or {}
+                interval = recurring.get("interval")
+                monthly_quota = _infer_monthly_quota_from_subscription_price_cents(unit_amount, interval)
+        except Exception:
+            monthly_quota = None
+        if monthly_quota is None:
+            monthly_quota = 6000
+
+        _set_user_plan_by_email(
+            email=email,
+            plan="pro",
+            customer_id=customer_id,
+            plan_ends_at_ts=plan_end_ts,
+            monthly_quota=monthly_quota,
+        )
+
+        return jsonify({
+            "ok": True,
+            "email": email,
+            "plan": "pro",
+            "monthly_quota": monthly_quota,
+            "customer_id": customer_id,
+            "plan_ends_at": plan_end_ts,
+        }), 200
+    except Exception as e:
+        app.logger.exception("sync-plan error")
+        return jsonify({"error": "sync_failed", "details": str(e)}), 500
 
 
 @app.route("/generate", methods=["POST"])
