@@ -454,8 +454,36 @@ def _set_user_plan_by_email(
     conn = _get_pg_conn()
     if not conn:
         return
+    # Bonus logic:
+    # - Paid plans are 2500 or 6000 credits/month.
+    # - When upgrading from Free, we also grant the remaining Free-plan credits for the month.
+    #   Implementation: increase monthly_quota by +1000 once at upgrade time (free quota).
+    #   This makes remaining credits = (paid_quota + 1000) - used_this_month.
+    FREE_MONTHLY_QUOTA_BONUS = 1000
     try:
         with conn.cursor() as cur:
+            # Detect whether this is an upgrade from free → apply bonus only once.
+            apply_bonus = False
+            try:
+                cur.execute(
+                    "SELECT plan FROM users WHERE lower(email) = lower(%s) LIMIT 1",
+                    (email,),
+                )
+                row = cur.fetchone()
+                prev_plan = (row[0] if row else None) or "free"
+                prev_plan = str(prev_plan).strip().lower()
+                apply_bonus = (prev_plan == "" or prev_plan == "free")
+            except Exception:
+                # If we cannot read previous plan (or user row doesn't exist yet), apply bonus.
+                apply_bonus = True
+
+            effective_quota = monthly_quota
+            if effective_quota is not None and apply_bonus:
+                try:
+                    effective_quota = int(effective_quota) + FREE_MONTHLY_QUOTA_BONUS
+                except Exception:
+                    effective_quota = monthly_quota
+
             if plan_ends_at_ts:
                 cur.execute(
                     """
@@ -469,7 +497,7 @@ def _set_user_plan_by_email(
                         updated_at = NOW()
                     WHERE lower(email) = lower(%s)
                     """,
-                    (plan, customer_id, int(plan_ends_at_ts), int(plan_ends_at_ts), monthly_quota, email),
+                    (plan, customer_id, int(plan_ends_at_ts), int(plan_ends_at_ts), effective_quota, email),
                 )
             else:
                 cur.execute(
@@ -482,7 +510,7 @@ def _set_user_plan_by_email(
                         updated_at = NOW()
                     WHERE lower(email) = lower(%s)
                     """,
-                    (plan, customer_id, monthly_quota, email),
+                    (plan, customer_id, effective_quota, email),
                 )
             conn.commit()
     except Exception as e:
