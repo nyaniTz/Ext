@@ -1226,7 +1226,18 @@ def speak():
 @app.route("/pricing", methods=["GET"])
 def pricing_page():
     """Hosted Stripe pricing table page for extension upgrade flow."""
-    return """
+    pricing_table_id = os.getenv("STRIPE_PRICING_TABLE_ID") or "prctbl_1TE3674ADvMqqrFJSEBcdyof"
+    pub_key = STRIPE_PUBLISHABLE_KEY or os.getenv("STRIPE_PUBLISHABLE_KEY") or ""
+    if not pub_key:
+        # Keep page functional but show a clear message if env isn't set.
+        return """
+<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AI Email Assistance Pricing</title>
+<style>body{font-family:Arial,sans-serif;margin:0;background:#f7f8fb;color:#111}.wrap{max-width:900px;margin:32px auto;padding:0 16px}h1{margin:0 0 8px;color:#092541}p{margin:0 0 20px;color:#555}</style>
+</head><body><div class="wrap"><h1>Pricing unavailable</h1><p>Server is missing STRIPE_PUBLISHABLE_KEY. Set it in environment variables and redeploy.</p></div></body></html>
+        """, 500, {"Content-Type": "text/html; charset=utf-8"}
+
+    return f"""
 <!doctype html>
 <html>
 <head>
@@ -1246,8 +1257,8 @@ def pricing_page():
     <h1>AI Email Assistance Plans</h1>
     <p>Choose a plan to unlock higher credits and premium features.</p>
     <stripe-pricing-table
-      pricing-table-id="prctbl_1TE3674ADvMqqrFJSEBcdyof"
-      publishable-key="pk_live_51TBUzD4ADvMqqrFJRA8R2HX29Pn1BiZvaWAC6n6CKqhHtXapM8ZambBr2D0OtivBmNA8lElF0ZbeOGgOzkugXRSx00gRKVcfOM">
+      pricing-table-id="{pricing_table_id}"
+      publishable-key="{pub_key}">
     </stripe-pricing-table>
   </div>
 </body>
