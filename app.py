@@ -1375,7 +1375,7 @@ def terms_page():
 
 @app.route("/stripe-success", methods=["GET"])
 def stripe_success_page():
-    """Simple confirmation page after successful checkout."""
+    """Professional confirmation page after successful checkout."""
     return """
 <!doctype html>
 <html>
@@ -1384,30 +1384,48 @@ def stripe_success_page():
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Payment successful</title>
   <style>
-    body { margin:0; font-family: Arial, sans-serif; background:#f7f8fb; color:#111; }
-    .wrap { max-width: 820px; margin: 36px auto; padding: 0 16px; }
-    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 10px 28px rgba(0,0,0,0.08); padding: 18px 18px 16px; }
-    h1 { margin:0 0 8px; color:#092541; font-size: 22px; }
-    p { margin:0 0 12px; color:#444; line-height:1.6; font-size: 14px; }
-    .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
-    a.btn { display:inline-block; text-decoration:none; padding:10px 14px; border-radius: 10px; font-weight:700; font-size: 13px; }
+    body { margin:0; font-family: Arial, sans-serif; background: linear-gradient(180deg, #eef4fb 0%, #f8fafc 100%); color:#111; }
+    .wrap { max-width: 900px; margin: 48px auto; padding: 0 18px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 18px; box-shadow: 0 18px 48px rgba(9,37,65,0.12); overflow:hidden; }
+    .hero { background: linear-gradient(135deg, #092541 0%, #1b4d7a 100%); color:#fff; padding: 26px 24px 22px; }
+    .badge { display:inline-flex; align-items:center; gap:8px; background: rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18); color:#fff; border-radius:999px; padding:8px 12px; font-size:12px; font-weight:700; letter-spacing:.02em; }
+    .badge-dot { width:10px; height:10px; border-radius:50%; background:#34d399; box-shadow:0 0 0 4px rgba(52,211,153,0.18); }
+    h1 { margin:14px 0 8px; font-size: 28px; line-height:1.2; }
+    .hero p { margin:0; color: rgba(255,255,255,0.9); font-size: 15px; line-height:1.6; }
+    .body { padding: 22px 24px 24px; }
+    .intro { margin:0 0 16px; color:#334155; line-height:1.7; font-size:15px; }
+    .steps { margin: 0 0 18px; padding: 0; list-style: none; display:grid; gap: 10px; }
+    .steps li { display:flex; gap:12px; align-items:flex-start; background:#f8fafc; border:1px solid #e2e8f0; border-radius: 12px; padding: 12px 13px; color:#334155; font-size:14px; line-height:1.6; }
+    .step-no { flex:0 0 auto; width:24px; height:24px; border-radius:50%; background:#092541; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; }
+    .note { background:#fff8e6; border:1px solid #f6d98b; color:#7a5a00; border-radius:12px; padding:12px 13px; font-size:14px; line-height:1.6; margin-bottom:18px; }
+    .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top: 8px; }
+    a.btn { display:inline-block; text-decoration:none; padding:11px 15px; border-radius: 12px; font-weight:700; font-size: 13px; transition: transform 120ms ease; }
+    a.btn:hover { transform: translateY(-1px); }
     .primary { background:#092541; color:#fff; border:1px solid #092541; }
     .ghost { background:#fff; color:#092541; border:1px solid #cbd5e1; }
-    .muted { color:#6b7280; font-size: 12px; margin-top: 10px; }
-    code { background:#f3f4f6; padding: 2px 6px; border-radius: 6px; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>Payment successful</h1>
-      <p>Your subscription was created. Your plan will upgrade automatically in a few seconds.</p>
-      <p>If Gmail is already open, go back and try generating again. If it still shows Free, refresh the Gmail tab once.</p>
-      <div class="btns">
-        <a class="btn primary" href="https://mail.google.com/" target="_blank" rel="noopener">Return to Gmail</a>
-        <a class="btn ghost" href="/pricing">Back to pricing</a>
+      <div class="hero">
+        <div class="badge"><span class="badge-dot"></span> Subscription confirmed</div>
+        <h1>Payment successful</h1>
+        <p>Your subscription has been created successfully. Your AI Email Assistance plan will be updated automatically in a few seconds.</p>
       </div>
-      <div class="muted">Tip: if the server was asleep, Stripe will retry the webhook until it succeeds.</div>
+      <div class="body">
+        <p class="intro">You can return to Gmail now and continue using AI Email Assistance.</p>
+        <ul class="steps">
+          <li><span class="step-no">1</span><span>Return to Gmail and try generating again.</span></li>
+          <li><span class="step-no">2</span><span>If Gmail is already open, go back to the same tab first.</span></li>
+          <li><span class="step-no">3</span><span>If your account still shows <strong>Free</strong>, please refresh the Gmail tab once and try again.</span></li>
+        </ul>
+        <div class="note"><strong>Important:</strong> If your account still appears on the Free plan after refreshing, wait a few moments and try again.</div>
+        <div class="btns">
+          <a class="btn primary" href="https://mail.google.com/" target="_blank" rel="noopener">Return to Gmail</a>
+          <a class="btn ghost" href="/pricing">Back to pricing</a>
+        </div>
+      </div>
     </div>
   </div>
 </body>
