@@ -1237,7 +1237,9 @@ def pricing_page():
 </head><body><div class="wrap"><h1>Pricing unavailable</h1><p>Server is missing STRIPE_PUBLISHABLE_KEY. Set it in environment variables and redeploy.</p></div></body></html>
         """, 500, {"Content-Type": "text/html; charset=utf-8"}
 
-    return f"""
+    # IMPORTANT: do NOT use f-strings with raw CSS braces `{}` unless escaped.
+    # Use str.format with escaped braces instead.
+    html = """
 <!doctype html>
 <html>
 <head>
@@ -1246,10 +1248,10 @@ def pricing_page():
   <title>AI Email Assistance Pricing</title>
   <script async src="https://js.stripe.com/v3/pricing-table.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; background: #f7f8fb; color: #111; }
-    .wrap { max-width: 1100px; margin: 32px auto; padding: 0 16px; }
-    h1 { margin: 0 0 8px; color: #092541; }
-    p { margin: 0 0 20px; color: #555; }
+    body {{ font-family: Arial, sans-serif; margin: 0; background: #f7f8fb; color: #111; }}
+    .wrap {{ max-width: 1100px; margin: 32px auto; padding: 0 16px; }}
+    h1 {{ margin: 0 0 8px; color: #092541; }}
+    p {{ margin: 0 0 20px; color: #555; }}
   </style>
 </head>
 <body>
@@ -1263,7 +1265,8 @@ def pricing_page():
   </div>
 </body>
 </html>
-    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+    """
+    return html.format(pricing_table_id=pricing_table_id, pub_key=pub_key), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.route("/terms", methods=["GET"])
