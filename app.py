@@ -1226,7 +1226,7 @@ def speak():
 @app.route("/pricing", methods=["GET"])
 def pricing_page():
     """Hosted Stripe pricing table page for extension upgrade flow."""
-    pricing_table_id = os.getenv("STRIPE_PRICING_TABLE_ID") or "prctbl_1TE3674ADvMqqrFJSEBcdyof"
+    pricing_table_id = os.getenv("STRIPE_PRICING_TABLE_ID") or "prctbl_1TR53pAWmPYcgBYulgQNg59b"
     pub_key = STRIPE_PUBLISHABLE_KEY or os.getenv("STRIPE_PUBLISHABLE_KEY") or ""
     if not pub_key:
         # Keep page functional but show a clear message if env isn't set.
