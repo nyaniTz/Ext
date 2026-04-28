@@ -1373,6 +1373,80 @@ def terms_page():
     """, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+@app.route("/stripe-success", methods=["GET"])
+def stripe_success_page():
+    """Simple confirmation page after successful checkout."""
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payment successful</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#f7f8fb; color:#111; }
+    .wrap { max-width: 820px; margin: 36px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 10px 28px rgba(0,0,0,0.08); padding: 18px 18px 16px; }
+    h1 { margin:0 0 8px; color:#092541; font-size: 22px; }
+    p { margin:0 0 12px; color:#444; line-height:1.6; font-size: 14px; }
+    .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
+    a.btn { display:inline-block; text-decoration:none; padding:10px 14px; border-radius: 10px; font-weight:700; font-size: 13px; }
+    .primary { background:#092541; color:#fff; border:1px solid #092541; }
+    .ghost { background:#fff; color:#092541; border:1px solid #cbd5e1; }
+    .muted { color:#6b7280; font-size: 12px; margin-top: 10px; }
+    code { background:#f3f4f6; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Payment successful</h1>
+      <p>Your subscription was created. Your plan will upgrade automatically in a few seconds.</p>
+      <p>If Gmail is already open, go back and try generating again. If it still shows Free, refresh the Gmail tab once.</p>
+      <div class="btns">
+        <a class="btn primary" href="https://mail.google.com/" target="_blank" rel="noopener">Return to Gmail</a>
+        <a class="btn ghost" href="/pricing">Back to pricing</a>
+      </div>
+      <div class="muted">Tip: if the server was asleep, Stripe will retry the webhook until it succeeds.</div>
+    </div>
+  </div>
+</body>
+</html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/stripe-cancel", methods=["GET"])
+def stripe_cancel_page():
+    """Landing page after cancelled checkout."""
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Checkout cancelled</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#f7f8fb; color:#111; }
+    .wrap { max-width: 820px; margin: 36px auto; padding: 0 16px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 10px 28px rgba(0,0,0,0.08); padding: 18px 18px 16px; }
+    h1 { margin:0 0 8px; color:#092541; font-size: 22px; }
+    p { margin:0 0 12px; color:#444; line-height:1.6; font-size: 14px; }
+    a.btn { display:inline-block; text-decoration:none; padding:10px 14px; border-radius: 10px; font-weight:700; font-size: 13px; background:#092541; color:#fff; border:1px solid #092541; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Checkout cancelled</h1>
+      <p>No payment was made. You can try again anytime.</p>
+      <a class="btn" href="/pricing">Back to pricing</a>
+    </div>
+  </div>
+</body>
+</html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     app.run(host="0.0.0.0", port=port)
