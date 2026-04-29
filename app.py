@@ -137,8 +137,8 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
             row = None
             try:
                 cur.execute(
-                    "SELECT monthly_quota, plan, is_blocked, usage_reset_at FROM users WHERE id = %s",
-                    (user_id,),
+                    "SELECT monthly_quota, plan, is_blocked, usage_reset_at FROM users WHERE id::text = %s::text",
+                    (str(user_id),),
                 )
                 row = cur.fetchone()
                 if row and len(row) >= 4:
@@ -148,8 +148,8 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                 # Undefined column
                 if err_code == "42703":
                     cur.execute(
-                        "SELECT monthly_quota, plan, is_blocked FROM users WHERE id = %s",
-                        (user_id,),
+                        "SELECT monthly_quota, plan, is_blocked FROM users WHERE id::text = %s::text",
+                        (str(user_id),),
                     )
                     row = cur.fetchone()
                 else:
@@ -168,9 +168,9 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                 """
                 SELECT """ + _credits_sql().strip() + """
                 FROM usage_events
-                WHERE user_id = %s AND created_at >= """ + month_start + """
+                WHERE user_id::text = %s::text AND created_at >= """ + month_start + """
                 """,
-                (user_id,),
+                (str(user_id),),
             )
             used_credits_total = int(cur.fetchone()[0] or 0)
 
@@ -184,9 +184,9 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                         """
                         SELECT """ + _credits_sql().strip() + """
                         FROM usage_events
-                        WHERE user_id = %s AND created_at >= """ + month_start + """ AND created_at < %s
+                        WHERE user_id::text = %s::text AND created_at >= """ + month_start + """ AND created_at < %s
                         """,
-                        (user_id, usage_reset_at),
+                        (str(user_id), usage_reset_at),
                     )
                     used_before = int(cur.fetchone()[0] or 0)
                     used_after = max(0, used_credits_total - used_before)
@@ -199,17 +199,17 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
             cur.execute(
                 """
                 SELECT COUNT(*) FROM usage_events
-                WHERE user_id = %s AND event_type = 'PLAY_VOICE' AND created_at >= """ + month_start + """
+                WHERE user_id::text = %s::text AND event_type = 'PLAY_VOICE' AND created_at >= """ + month_start + """
                 """,
-                (user_id,),
+                (str(user_id),),
             )
             voice_plays_used = int(cur.fetchone()[0] or 0)
             cur.execute(
                 """
                 SELECT COUNT(*) FROM usage_events
-                WHERE user_id = %s AND event_type = 'RECORD_VOICE' AND created_at >= """ + month_start + """
+                WHERE user_id::text = %s::text AND event_type = 'RECORD_VOICE' AND created_at >= """ + month_start + """
                 """,
-                (user_id,),
+                (str(user_id),),
             )
             voice_records_used = int(cur.fetchone()[0] or 0)
         # Unlimited quota (e.g. -1)
