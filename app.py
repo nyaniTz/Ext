@@ -690,26 +690,80 @@ def stripe_webhook():
             )
 
         # Subscription cancelled → downgrade to free
-        elif event_type == "customer.subscription.deleted":
+        # NOTE: Stripe may emit either:
+        # - customer.subscription.updated (when cancel_at_period_end is set)
+        # - customer.subscription.deleted (when canceled immediately / ended)
+        #
+        # If cancel_at_period_end=True, the user should generally remain "pro" until current_period_end,
+        # but we should still persist plan_ends_at so the app can downgrade later if needed.
+        elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
             customer_id = obj.get("customer")
-            # best-effort: if we have customer_id, try to downgrade by customer_id
-            conn = _get_pg_conn()
-            if conn and customer_id:
+            status = (obj.get("status") or "").strip().lower()
+            cancel_at_period_end = bool(obj.get("cancel_at_period_end"))
+            current_period_end = obj.get("current_period_end")
+            ended_at = obj.get("ended_at")
+
+            def _update_user_by_customer_id(*, set_free_now: bool):
+                conn = _get_pg_conn()
+                if not conn or not customer_id:
+                    return
                 try:
                     with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE users
-                            SET plan = 'free',
-                                monthly_quota = 1000,
-                                updated_at = NOW()
-                            WHERE payment_customer_id = %s
-                            """,
-                            (customer_id,),
-                        )
+                        if set_free_now:
+                            # Downgrade immediately.
+                            try:
+                                cur.execute(
+                                    """
+                                    UPDATE users
+                                    SET plan = 'free',
+                                        is_blocked = FALSE,
+                                        monthly_quota = 1000,
+                                        plan_ends_at = NULL,
+                                        plan_expires_at = NULL,
+                                        updated_at = NOW()
+                                    WHERE payment_customer_id = %s
+                                    """,
+                                    (customer_id,),
+                                )
+                            except Exception as col_err:
+                                # If plan_ends_at/plan_expires_at columns don't exist, fall back.
+                                if getattr(col_err, "pgcode", None) == "42703":
+                                    cur.execute(
+                                        """
+                                        UPDATE users
+                                        SET plan = 'free',
+                                            is_blocked = FALSE,
+                                            monthly_quota = 1000,
+                                            updated_at = NOW()
+                                        WHERE payment_customer_id = %s
+                                        """,
+                                        (customer_id,),
+                                    )
+                                else:
+                                    raise
+                        else:
+                            # Cancel-at-period-end: keep plan as-is, but persist end timestamp if possible.
+                            if current_period_end:
+                                try:
+                                    cur.execute(
+                                        """
+                                        UPDATE users
+                                        SET plan_ends_at = to_timestamp(%s),
+                                            plan_expires_at = to_timestamp(%s),
+                                            updated_at = NOW()
+                                        WHERE payment_customer_id = %s
+                                        """,
+                                        (int(current_period_end), int(current_period_end), customer_id),
+                                    )
+                                except Exception as col_err:
+                                    if getattr(col_err, "pgcode", None) == "42703":
+                                        # Column missing: ignore quietly.
+                                        pass
+                                    else:
+                                        raise
                         conn.commit()
                 except Exception as e:
-                    app.logger.warning("Failed to downgrade user on subscription deleted: %s", e)
+                    app.logger.warning("Failed to apply subscription cancel/update: %s", e)
                     try:
                         conn.rollback()
                     except Exception:
@@ -719,6 +773,18 @@ def stripe_webhook():
                         conn.close()
                     except Exception:
                         pass
+
+            # Determine whether to downgrade now or keep pro-until-end.
+            downgrade_now = (
+                event_type == "customer.subscription.deleted"
+                or status == "canceled"
+                or bool(ended_at)
+                or (not cancel_at_period_end and status in ("canceled", "unpaid"))
+            )
+            if downgrade_now:
+                _update_user_by_customer_id(set_free_now=True)
+            elif cancel_at_period_end:
+                _update_user_by_customer_id(set_free_now=False)
 
     except Exception as e:
         app.logger.exception("Stripe webhook handler error: %s", e)
