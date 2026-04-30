@@ -1439,6 +1439,102 @@ def terms_page():
     """, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+@app.route("/privacy", methods=["GET"])
+def privacy_page():
+    """Hosted Privacy Policy page for OAuth verification and extension footer links."""
+    return """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Email Assistance - Privacy Policy</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fb; color: #1f2937; line-height: 1.62; }
+    .wrap { max-width: 980px; margin: 28px auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.08); overflow: hidden; }
+    .header { padding: 20px 24px; background: #092541; color: #fff; }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .header p { margin: 6px 0 0; font-size: 13px; color: rgba(255,255,255,0.86); }
+    .content { padding: 24px; }
+    h2 { margin: 22px 0 10px; font-size: 17px; color: #092541; }
+    p { margin: 8px 0; font-size: 14px; }
+    ul { margin: 8px 0 8px 20px; padding: 0; font-size: 14px; }
+    li { margin: 6px 0; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .callout { margin-top: 14px; padding: 12px 14px; background: #f3f7fc; border: 1px solid #d9e8fb; border-radius: 10px; }
+    .callout strong { color: #092541; }
+    .contact { margin-top: 24px; padding: 12px 14px; background: #fff8e6; border: 1px solid #f6d98b; color: #7a5a00; border-radius: 10px; }
+    .contact a { color: #092541; font-weight: 700; text-decoration: none; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>AI Email Assistance - Privacy Policy</h1>
+      <p>Last updated: Apr 30, 2026</p>
+    </div>
+    <div class="content">
+      <p>This Privacy Policy explains how AI Email Assistance ("we", "us", or "our") collects, uses, and shares information when you use our browser extension, hosted pages, and related services (the "Service").</p>
+
+      <div class="callout">
+        <p><strong>Important:</strong> AI Email Assistance helps you draft replies in Gmail. You are responsible for reviewing and sending any message. Please avoid submitting highly sensitive data unless you are authorized to do so.</p>
+      </div>
+
+      <h2>INFORMATION WE COLLECT</h2>
+      <ul>
+        <li><strong>Account identifiers:</strong> if you sign in with Google, we store your Google email address and a Google user identifier to associate usage and plan status.</li>
+        <li><strong>Usage data:</strong> we store usage events (for example: generating suggestions, summarizing an email, voice playback/transcription usage) to enforce quotas and provide plan features.</li>
+        <li><strong>Content you submit for AI:</strong> when you request AI email details, suggestions, or edits, the text you provide (and relevant email context) is sent to an AI model provider through our server to generate the result.</li>
+        <li><strong>Payment metadata (paid plans):</strong> payments are processed by Stripe. We may store Stripe customer and subscription identifiers to keep your plan status in sync.</li>
+      </ul>
+
+      <h2>HOW WE USE INFORMATION</h2>
+      <ul>
+        <li>Provide the Service features (email details, suggestions, translations, voice features).</li>
+        <li>Authenticate you and associate your plan status with your account.</li>
+        <li>Prevent abuse, enforce quotas, and maintain service reliability.</li>
+        <li>Process subscription status updates (upgrade, renewal, cancellation) via Stripe webhooks.</li>
+        <li>Improve the Service (debugging, performance, and feature development).</li>
+      </ul>
+
+      <h2>HOW WE SHARE INFORMATION</h2>
+      <ul>
+        <li><strong>AI providers:</strong> when you use AI features, relevant text is sent to the selected AI model provider (for example OpenAI, DeepSeek, or Google Gemini) to generate results.</li>
+        <li><strong>Payment provider:</strong> Stripe processes payments and subscription management for paid plans.</li>
+        <li><strong>Legal & security:</strong> we may disclose information if required by law, or to protect users, prevent fraud/abuse, or address security incidents.</li>
+      </ul>
+
+      <h2>DATA RETENTION</h2>
+      <p>We retain account identifiers and usage records for as long as needed to provide the Service, enforce quotas, and meet legal, security, or billing requirements. We may retain limited logs for troubleshooting and abuse prevention.</p>
+
+      <h2>SECURITY</h2>
+      <p>We take reasonable measures to protect information in transit and at rest. No system can be 100% secure, so please use the Service responsibly and keep your browser and Google account secure.</p>
+
+      <h2>YOUR CHOICES</h2>
+      <ul>
+        <li>You can stop using the Service at any time by disabling or uninstalling the extension.</li>
+        <li>If you use a paid plan, you can cancel your subscription in Stripe (or via the customer portal if enabled).</li>
+        <li>You may contact us to request access, correction, or deletion of your account data, subject to legal and operational constraints.</li>
+      </ul>
+
+      <h2>CHANGES TO THIS POLICY</h2>
+      <p>We may update this Privacy Policy from time to time. Updates become effective when published on this page.</p>
+
+      <h2>CONTACT US</h2>
+      <div class="contact">
+        <p>For privacy questions or requests, contact:</p>
+        <p><a href="mailto:aiemailassistance@gmail.com">aiemailassistance@gmail.com</a></p>
+      </div>
+
+      <p class="muted">For Terms of Use, see <a href="/terms">/terms</a>. For pricing, see <a href="/pricing">/pricing</a>.</p>
+    </div>
+  </div>
+</body>
+</html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 @app.route("/stripe-success", methods=["GET"])
 def stripe_success_page():
     """Professional confirmation page after successful checkout."""
