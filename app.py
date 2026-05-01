@@ -575,7 +575,7 @@ def index():
 
 @app.route("/google10339bab4366663c.html", methods=["GET"])
 def google_site_verification():
-    return "google-site-verification: google10339bab4366663c", 200, {'Content-Type': 'text/html; charset=utf-8'}
+    return "google-site-verification: google10339bab4366663c.html", 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 @app.route("/health", methods=["GET"])
