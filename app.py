@@ -412,8 +412,6 @@ def check_auth():
 
 @app.route("/", methods=["GET"])
 def index():
-    # IMPORTANT: Replace the content of the <meta name="google-site-verification"> tag
-    # with your actual token from Google Search Console to prove domain ownership.
     html = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -558,6 +556,21 @@ def index():
 
     <a href="/pricing" class="cta">View Plans &amp; Pricing</a>
     <p class="note">Install from the Chrome Web Store &middot; Works inside Gmail</p>
+
+    <div style="margin-top:40px;padding:24px 28px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;text-align:left;max-width:600px;margin-left:auto;margin-right:auto;">
+      <h3 style="font-size:15px;font-weight:700;color:#1f3d53;margin-bottom:10px;">About AI Email Assistance</h3>
+      <p style="font-size:13px;color:#555;line-height:1.7;margin-bottom:14px;">
+        <strong>AI Email Assistance</strong> is a Chrome extension that connects to Gmail to help users write, reply to,
+        and improve emails using artificial intelligence. The extension accesses your Gmail interface to read the current
+        email thread and generate contextually relevant replies and compositions. No email content is stored on our servers.
+      </p>
+      <p style="font-size:13px;color:#555;line-height:1.7;">
+        By using this extension you agree to our
+        <a href="/terms" style="color:#1f3d53;font-weight:600;">Terms of Service</a>.
+        For information on how we handle your data, please read our
+        <a href="/privacy" style="color:#1f3d53;font-weight:600;">Privacy Policy</a>.
+      </p>
+    </div>
   </main>
 
   <footer>
