@@ -412,7 +412,170 @@ def check_auth():
 
 @app.route("/", methods=["GET"])
 def index():
-    return "NEU AutoReply Flask proxy running"
+    # IMPORTANT: Replace the content of the <meta name="google-site-verification"> tag
+    # with your actual token from Google Search Console to prove domain ownership.
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="google-site-verification" content="google10339bab4366663c" />
+  <title>AI Email Assistance</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #f7f8fc;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #1f3d53;
+      color: #fff;
+      padding: 18px 40px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+    header span { font-size: 13px; opacity: 0.7; margin-left: auto; }
+    main {
+      flex: 1;
+      max-width: 780px;
+      margin: 60px auto;
+      padding: 0 24px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      background: #e8f4fd;
+      color: #1f3d53;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 20px;
+      margin-bottom: 22px;
+    }
+    h2 {
+      font-size: 38px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 18px;
+      color: #1a1a2e;
+    }
+    .subtitle {
+      font-size: 18px;
+      color: #555;
+      line-height: 1.7;
+      max-width: 600px;
+      margin: 0 auto 40px;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 20px;
+      margin: 0 auto 50px;
+      text-align: left;
+    }
+    .feature {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 22px 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .feature .icon { font-size: 26px; margin-bottom: 10px; }
+    .feature h3 { font-size: 15px; font-weight: 700; margin-bottom: 6px; color: #1f3d53; }
+    .feature p { font-size: 13px; color: #666; line-height: 1.6; }
+    .cta {
+      background: #1f3d53;
+      color: #fff;
+      border: none;
+      padding: 14px 36px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      margin-bottom: 16px;
+    }
+    .cta:hover { background: #16303f; }
+    .note { font-size: 13px; color: #888; margin-bottom: 50px; }
+    footer {
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      text-align: center;
+      padding: 20px;
+      font-size: 13px;
+      color: #888;
+    }
+    footer a { color: #1f3d53; text-decoration: none; margin: 0 10px; font-weight: 500; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Email Assistance</h1>
+    <span>Chrome Extension</span>
+  </header>
+
+  <main>
+    <div class="badge">Gmail Chrome Extension</div>
+    <h2>Write better emails,<br/>faster &mdash; with AI</h2>
+    <p class="subtitle">
+      AI Email Assistance is a Chrome extension that integrates directly into Gmail.
+      It uses artificial intelligence to help you compose, reply to, and refine emails
+      &mdash; saving time and improving the quality of every message you send.
+    </p>
+
+    <div class="features">
+      <div class="feature">
+        <div class="icon">&#9889;</div>
+        <h3>AI Reply Suggestions</h3>
+        <p>Instantly generate smart, context-aware email replies with one click directly inside Gmail.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#9997;&#65039;</div>
+        <h3>Email Composition</h3>
+        <p>Describe what you want to say and let AI draft a polished email for you in seconds.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#127908;</div>
+        <h3>Voice-to-Email</h3>
+        <p>Record your voice and have AI transcribe and format it into a professional email message.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">&#127757;</div>
+        <h3>Multi-language</h3>
+        <p>Generate and refine emails in multiple languages to communicate globally with confidence.</p>
+      </div>
+    </div>
+
+    <a href="/pricing" class="cta">View Plans &amp; Pricing</a>
+    <p class="note">Install from the Chrome Web Store &middot; Works inside Gmail</p>
+  </main>
+
+  <footer>
+    <p>
+      &copy; 2026 AI Email Assistance &nbsp;&middot;&nbsp;
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/pricing">Pricing</a>
+    </p>
+  </footer>
+</body>
+</html>"""
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.route("/google10339bab4366663c.html", methods=["GET"])
+def google_site_verification():
+    return "google-site-verification: google10339bab4366663c", 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 @app.route("/health", methods=["GET"])
