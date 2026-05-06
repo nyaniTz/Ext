@@ -1313,6 +1313,7 @@ def transcribe():
         user_id = user.get("id") if user else None
         audio_base64 = data.get("audio", "")
         model = data.get("model", "whisper-1")
+        language = (data.get("language") or "").strip() or "en"
 
         if not audio_base64:
             return jsonify({"error": "no-audio-provided"}), 400
@@ -1344,7 +1345,8 @@ def transcribe():
         
         # Send to OpenAI Whisper API
         files = {"file": ("audio.webm", audio_file, "audio/webm")}
-        data_payload = {"model": model}
+        # Force language + low temperature to reduce hallucinations / wrong-language output
+        data_payload = {"model": model, "language": language, "temperature": "0"}
 
         try:
             resp = requests.post(
