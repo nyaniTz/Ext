@@ -1315,6 +1315,7 @@ def transcribe():
         model = data.get("model", "whisper-1")
         # Let Whisper auto-detect language unless the client explicitly requests one.
         language = (data.get("language") or "").strip()
+        prompt = (data.get("prompt") or "").strip()
 
         if not audio_base64:
             return jsonify({"error": "no-audio-provided"}), 400
@@ -1350,6 +1351,8 @@ def transcribe():
         data_payload = {"model": model, "temperature": "0"}
         if language:
             data_payload["language"] = language
+        if prompt:
+            data_payload["prompt"] = prompt
 
         try:
             resp = requests.post(
