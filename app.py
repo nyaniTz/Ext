@@ -35,38 +35,45 @@ def _get_pg_conn():
 CREDITS_REPLY = 40          # GENERATE_REPLY, SUMMARY, GENERATE_REPLY_MULTI
 CREDITS_PLAY_VOICE = 50
 CREDITS_RECORD_VOICE = 50
-FREE_VOICE_PLAY_LIMIT = 2
-FREE_VOICE_RECORD_LIMIT = 2
+
+# Monthly credit pools (each AI suggestion run ≈ 40 credits)
+FREE_MONTHLY_QUOTA = 2000       # ~50 suggestion runs / month
+TIER_5_MONTHLY_QUOTA = 6000     # ~150 suggestion runs / month ($5)
+TIER_10_MONTHLY_QUOTA = 15000   # ~375 suggestion runs / month ($10)
+
+FREE_VOICE_PLAY_LIMIT = 8
+FREE_VOICE_RECORD_LIMIT = 8
+TIER_5_VOICE_LIMIT = 75
+TIER_10_VOICE_LIMIT = 200
 
 
 def _voice_limits_from_monthly_quota(monthly_quota: int):
     """
-    Map paid tier monthly_quota → voice limits.
-    Assumes:
-      - $5 tier → monthly_quota = 2500 → 30 plays/records
-      - $10 tier → monthly_quota = 6000 → 120 plays/records
+    Map monthly_quota → voice play/record limits (separate from credit pool).
     """
     try:
         q = int(monthly_quota)
     except Exception:
-        q = 1000
+        q = FREE_MONTHLY_QUOTA
 
     # Unlimited credits tier (if any)
     if q < 0:
-        return 120, 120
+        return TIER_10_VOICE_LIMIT, TIER_10_VOICE_LIMIT
 
-    if q >= 6000:
-        return 120, 120
-    if q >= 2500:
-        return 30, 30
-    return FREE_VOICE_PLAY_LIMIT, FREE_VOICE_RECORD_LIMIT
+    if q >= TIER_10_MONTHLY_QUOTA:
+        return TIER_10_VOICE_LIMIT, TIER_10_VOICE_LIMIT
+    if q >= TIER_5_MONTHLY_QUOTA:
+        return TIER_5_VOICE_LIMIT, TIER_5_VOICE_LIMIT
+    if q >= FREE_MONTHLY_QUOTA:
+        return FREE_VOICE_PLAY_LIMIT, FREE_VOICE_RECORD_LIMIT
+    return 2, 2
 
 
 def _infer_monthly_quota_from_subscription_price_cents(unit_amount_cents: int | None, interval: str | None):
     """
-    Map Stripe subscription price → our monthly_quota.
-      - $5/month  -> 2500 credits
-      - $10/month -> 6000 credits
+    Map Stripe subscription price → monthly_quota (credits).
+      - $5/month  -> TIER_5_MONTHLY_QUOTA
+      - $10/month -> TIER_10_MONTHLY_QUOTA
     For yearly prices, we assume the monthly equivalent and map to the same tiers.
     """
     if not unit_amount_cents:
@@ -87,11 +94,11 @@ def _infer_monthly_quota_from_subscription_price_cents(unit_amount_cents: int | 
     if monthly_equiv_usd is None:
         return None
 
-    # Tier mapping by monthly equivalent
-    # Using thresholds keeps this robust to minor price formatting differences.
+  # Tier mapping by monthly equivalent
+  # Using thresholds keeps this robust to minor price formatting differences.
     if monthly_equiv_usd < 7.0:
-        return 2500
-    return 6000
+        return TIER_5_MONTHLY_QUOTA
+    return TIER_10_MONTHLY_QUOTA
 
 
 def _credits_sql():
@@ -123,13 +130,13 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
     Check if user is within monthly quota (credit-based) and optional voice limits.
     Returns (allowed, used_credits, quota, voice_plays_used, voice_records_used).
     If DEVELOPER_EMAILS contains user_email, always allowed (no block for dev/test).
-    If no DB or user not found, returns (True, 0, 1000, 0, 0).
+    If no DB or user not found, returns (True, 0, FREE_MONTHLY_QUOTA, 0, 0).
     """
     if user_email and _is_developer_email(user_email):
-        return True, 0, 1000, 0, 0
+        return True, 0, FREE_MONTHLY_QUOTA, 0, 0
     conn = _get_pg_conn()
     if not conn or not user_id:
-        return True, 0, 1000, 0, 0
+        return True, 0, FREE_MONTHLY_QUOTA, 0, 0
     try:
         with conn.cursor() as cur:
             # Prefer including usage_reset_at (added later). Fall back if column doesn't exist.
@@ -155,13 +162,13 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                 else:
                     raise
         if not row:
-            return True, 0, 1000, 0, 0
+            return True, 0, FREE_MONTHLY_QUOTA, 0, 0
         monthly_quota, plan, is_blocked = row[0], row[1], row[2]
-        quota = int(monthly_quota or 1000)
+        quota = int(monthly_quota or FREE_MONTHLY_QUOTA)
         if is_blocked:
             return False, 0, quota, 0, 0
         # Compute voice limits from monthly_quota, not from "is_paid".
-        voice_play_limit, voice_record_limit = _voice_limits_from_monthly_quota(int(monthly_quota or 1000))
+        voice_play_limit, voice_record_limit = _voice_limits_from_monthly_quota(int(monthly_quota or FREE_MONTHLY_QUOTA))
         month_start = "date_trunc('month', NOW() AT TIME ZONE 'UTC')"
         with conn.cursor() as cur:
             cur.execute(
@@ -174,7 +181,7 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
             )
             used_credits_total = int(cur.fetchone()[0] or 0)
 
-            # If user upgraded mid-month, count "free" usage only up to 1000 before upgrade,
+            # If user upgraded mid-month, count "free" usage only up to FREE_MONTHLY_QUOTA before upgrade,
             # then count usage after upgrade against paid quota.
             used_credits_effective = used_credits_total
             try:
@@ -190,9 +197,9 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                     )
                     used_before = int(cur.fetchone()[0] or 0)
                     used_after = max(0, used_credits_total - used_before)
-                    used_credits_effective = min(used_before, 1000) + used_after
+                    used_credits_effective = min(used_before, FREE_MONTHLY_QUOTA) + used_after
                     # Bonus: remaining free quota + paid quota (paid quota is users.monthly_quota)
-                    quota = int(monthly_quota or 1000) + 1000
+                    quota = int(monthly_quota or FREE_MONTHLY_QUOTA) + FREE_MONTHLY_QUOTA
             except Exception:
                 used_credits_effective = used_credits_total
 
@@ -228,7 +235,7 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         return allowed, used_credits_effective, quota, voice_plays_used, voice_records_used
     except Exception as e:
         app.logger.warning("Quota check failed: %s", e)
-        return True, 0, 1000, 0, 0
+        return True, 0, FREE_MONTHLY_QUOTA, 0, 0
     finally:
         try:
             conn.close()
@@ -792,7 +799,7 @@ def stripe_webhook():
                     if amount_total_cents:
                         amount_usd = float(amount_total_cents) / 100.0
                         # $5/mo is ~5, $10/mo is ~10, annual plans are much higher but still map to 6000.
-                        monthly_quota = 2500 if amount_usd <= 6.0 else 6000
+                        monthly_quota = TIER_5_MONTHLY_QUOTA if amount_usd <= 6.0 else TIER_10_MONTHLY_QUOTA
                 except Exception:
                     monthly_quota = None
             _set_user_plan_by_email(
@@ -800,7 +807,7 @@ def stripe_webhook():
                 plan="pro",
                 customer_id=customer_id,
                 plan_ends_at_ts=plan_end_ts,
-                monthly_quota=monthly_quota if monthly_quota is not None else 6000,
+                monthly_quota=monthly_quota if monthly_quota is not None else TIER_10_MONTHLY_QUOTA,
             )
 
         # Subscription renewed / paid invoice
@@ -854,7 +861,7 @@ def stripe_webhook():
                     amount_total_cents = obj.get("amount_paid") or obj.get("amount_due") or obj.get("total")
                     if amount_total_cents:
                         amount_usd = float(amount_total_cents) / 100.0
-                        monthly_quota = 2500 if amount_usd <= 6.0 else 6000
+                        monthly_quota = TIER_5_MONTHLY_QUOTA if amount_usd <= 6.0 else TIER_10_MONTHLY_QUOTA
                 except Exception:
                     monthly_quota = None
             _set_user_plan_by_email(
@@ -862,7 +869,7 @@ def stripe_webhook():
                 plan="pro",
                 customer_id=customer_id,
                 plan_ends_at_ts=plan_end_ts,
-                monthly_quota=monthly_quota if monthly_quota is not None else 6000,
+                monthly_quota=monthly_quota if monthly_quota is not None else TIER_10_MONTHLY_QUOTA,
             )
 
         # Subscription cancelled → downgrade to free
@@ -893,7 +900,7 @@ def stripe_webhook():
                                     UPDATE users
                                     SET plan = 'free',
                                         is_blocked = FALSE,
-                                        monthly_quota = 1000,
+                                        monthly_quota = FREE_MONTHLY_QUOTA,
                                         plan_ends_at = NULL,
                                         plan_expires_at = NULL,
                                         updated_at = NOW()
@@ -909,7 +916,7 @@ def stripe_webhook():
                                         UPDATE users
                                         SET plan = 'free',
                                             is_blocked = FALSE,
-                                            monthly_quota = 1000,
+                                            monthly_quota = FREE_MONTHLY_QUOTA,
                                             updated_at = NOW()
                                         WHERE payment_customer_id = %s
                                         """,
@@ -1044,7 +1051,7 @@ def sync_plan():
         except Exception:
             monthly_quota = None
         if monthly_quota is None:
-            monthly_quota = 6000
+            monthly_quota = TIER_10_MONTHLY_QUOTA
 
         _set_user_plan_by_email(
             email=email,
@@ -1079,7 +1086,7 @@ def generate():
         data = request.get_json() or {}
         user = data.get("user") if isinstance(data.get("user"), dict) else None
         user_id = user.get("id") if user else None
-        used_credits, quota = 0, 1000
+        used_credits, quota = 0, FREE_MONTHLY_QUOTA
 
         event_type = (data.get("event_type") or "").strip().upper()
         is_assistance = (event_type == "ASSISTANCE")
