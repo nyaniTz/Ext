@@ -125,6 +125,19 @@ def _is_developer_email(email):
     return email.strip().lower() in emails
 
 
+def _has_generate_page_pro(user_email, monthly_quota, plan=None):
+    """Pro visual email builder: paid tier, non-free plan, or developer allowlist."""
+    if user_email and _is_developer_email(user_email):
+        return True
+    p = str(plan or "").strip().lower()
+    if p and p not in ("free", ""):
+        return True
+    try:
+        return int(monthly_quota or 0) >= TIER_5_MONTHLY_QUOTA
+    except Exception:
+        return False
+
+
 def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_record=False, user_email=None):
     """
     Check if user is within monthly quota (credit-based) and optional voice limits.
@@ -1293,6 +1306,22 @@ def generate():
         if user_id:
             out["used"] = used_credits
             out["quota"] = quota
+            user_email = (user.get("email") if isinstance(user, dict) else None) or None
+            user_plan = None
+            try:
+                conn_gp = _get_pg_conn()
+                if conn_gp and user_id:
+                    with conn_gp.cursor() as cur_gp:
+                        cur_gp.execute(
+                            "SELECT plan FROM users WHERE id::text = %s::text",
+                            (str(user_id),),
+                        )
+                        row_gp = cur_gp.fetchone()
+                        if row_gp:
+                            user_plan = row_gp[0]
+            except Exception:
+                user_plan = None
+            out["generate_page_pro"] = _has_generate_page_pro(user_email, quota, user_plan)
         return jsonify(out)
         
     except Exception as e:
