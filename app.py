@@ -412,7 +412,14 @@ limiter = Limiter(
 )
 
 # Stickers + animated emojis — extension uses Koyeb URLs (same paths as GitHub repo)
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# GitHub Ext: app.py + St/ at repo root. Local extension copy: app.py in server/ subfolder.
+_APP_DIR = os.path.abspath(os.path.dirname(__file__))
+if os.path.isdir(os.path.join(_APP_DIR, "St")) or os.path.isdir(
+    os.path.join(_APP_DIR, "AnimationsEmoji")
+):
+    _REPO_ROOT = _APP_DIR
+else:
+    _REPO_ROOT = os.path.abspath(os.path.join(_APP_DIR, ".."))
 _ST_DIR = os.path.join(_REPO_ROOT, "St")
 _EMOJI_DIR = os.path.join(_REPO_ROOT, "AnimationsEmoji")
 _GITHUB_MEDIA_BASE = (
