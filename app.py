@@ -411,6 +411,29 @@ limiter = Limiter(
     storage_uri=storage_uri,
 )
 
+# Stickers + animated emojis (extension loads from Koyeb; folders live in repo root)
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_ST_DIR = os.path.join(_REPO_ROOT, "St")
+_EMOJI_DIR = os.path.join(_REPO_ROOT, "AnimationsEmoji")
+if os.path.isdir(_ST_DIR) or os.path.isdir(_EMOJI_DIR):
+    from flask import send_from_directory
+    import logging
+
+    if os.path.isdir(_ST_DIR):
+
+        @app.route("/St/<path:filename>")
+        def serve_sticker_file(filename):
+            return send_from_directory(_ST_DIR, filename)
+
+        logging.info("Serving stickers from %s", _ST_DIR)
+    if os.path.isdir(_EMOJI_DIR):
+
+        @app.route("/AnimationsEmoji/<path:filename>")
+        def serve_animated_emoji_file(filename):
+            return send_from_directory(_EMOJI_DIR, filename)
+
+        logging.info("Serving animated emojis from %s", _EMOJI_DIR)
+
 # Stripe configuration (secret key from environment; DO NOT hardcode)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY") or ""
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY") or ""
