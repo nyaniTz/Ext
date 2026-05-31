@@ -466,9 +466,18 @@ def _proxy_github_media(relative_path):
         return None
 
 
-from flask import send_file, Response, abort
+from flask import send_file, Response, abort, make_response
 import logging
 import mimetypes
+
+
+def _media_response(resp):
+    """CORS for extension / tools that fetch from mail.google.com."""
+    if resp is not None:
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+    return resp
+
 
 _has_st = os.path.isdir(_ST_DIR)
 _has_emoji = os.path.isdir(_EMOJI_DIR)
@@ -483,50 +492,70 @@ logging.info(
 
 
 @limiter.exempt
-@app.route("/St/<path:filename>")
+@app.route("/St/<path:filename>", methods=["GET", "HEAD", "OPTIONS"])
 def serve_sticker_file(filename):
+    if request.method == "OPTIONS":
+        return _media_response(make_response("", 204))
     rel = _normalize_media_relpath(filename)
     if not rel:
         abort(404)
     local_path = _local_media_path(_ST_DIR, rel)
     if local_path:
         try:
-            return send_file(
-                local_path,
-                mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
-                max_age=86400,
-                conditional=True,
+            return _media_response(
+                send_file(
+                    local_path,
+                    mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
+                    max_age=86400,
+                    conditional=True,
+                )
             )
         except Exception as e:
             logging.warning("Local sticker serve failed %s: %s", rel, e)
     proxied = _proxy_github_media("St/" + rel)
     if proxied:
         body, ctype = proxied
-        return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
+        return _media_response(
+            Response(
+                body,
+                mimetype=ctype,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        )
     abort(404)
 
 
 @limiter.exempt
-@app.route("/AnimationsEmoji/<path:filename>")
+@app.route("/AnimationsEmoji/<path:filename>", methods=["GET", "HEAD", "OPTIONS"])
 def serve_animated_emoji_file(filename):
+    if request.method == "OPTIONS":
+        return _media_response(make_response("", 204))
     rel = _normalize_media_relpath(filename)
     if not rel:
         abort(404)
     local_path = _local_media_path(_EMOJI_DIR, rel)
     if local_path:
         try:
-            return send_file(
-                local_path,
-                mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
-                max_age=86400,
-                conditional=True,
+            return _media_response(
+                send_file(
+                    local_path,
+                    mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
+                    max_age=86400,
+                    conditional=True,
+                )
             )
         except Exception as e:
             logging.warning("Local emoji serve failed %s: %s", rel, e)
     proxied = _proxy_github_media("AnimationsEmoji/" + rel)
     if proxied:
         body, ctype = proxied
-        return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
+        return _media_response(
+            Response(
+                body,
+                mimetype=ctype,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        )
     abort(404)
 
 # Stripe configuration (secret key from environment; DO NOT hardcode)
