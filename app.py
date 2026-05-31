@@ -428,27 +428,47 @@ _GITHUB_MEDIA_BASE = (
 )
 
 
-def _safe_media_filename(filename):
-    if not filename or ".." in filename or filename.startswith(("/", "\\")):
-        return False
-    return True
+def _normalize_media_relpath(filename):
+    if not filename:
+        return None
+    rel = str(filename).replace("\\", "/").strip().lstrip("/")
+    if not rel:
+        return None
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        return None
+    return rel
+
+
+def _local_media_path(base_dir, filename):
+    rel = _normalize_media_relpath(filename)
+    if not rel:
+        return None
+    full = os.path.normpath(os.path.join(base_dir, rel))
+    base = os.path.normpath(base_dir)
+    if not full.startswith(base + os.sep):
+        return None
+    return full if os.path.isfile(full) else None
 
 
 def _proxy_github_media(relative_path):
-    """When St/ or AnimationsEmoji/ are not on the Koyeb image, fetch from GitHub."""
-    url = _GITHUB_MEDIA_BASE + "/" + relative_path.lstrip("/")
+    rel = str(relative_path or "").replace("\\", "/").strip().lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    url = _GITHUB_MEDIA_BASE + "/" + rel
     try:
         r = requests.get(url, timeout=90)
         if not r.ok:
             return None
-        ctype = r.headers.get("Content-Type") or "application/octet-stream"
+        ctype = (r.headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
         return r.content, ctype
     except Exception:
         return None
 
 
-from flask import send_from_directory, Response, abort
+from flask import send_file, Response, abort
 import logging
+import mimetypes
 
 _has_st = os.path.isdir(_ST_DIR)
 _has_emoji = os.path.isdir(_EMOJI_DIR)
@@ -462,28 +482,48 @@ logging.info(
 )
 
 
+@limiter.exempt
 @app.route("/St/<path:filename>")
 def serve_sticker_file(filename):
-    if not _safe_media_filename(filename):
-        abort(400)
-    local_path = os.path.join(_ST_DIR, filename)
-    if os.path.isfile(local_path):
-        return send_from_directory(_ST_DIR, filename)
-    proxied = _proxy_github_media("St/" + filename)
+    rel = _normalize_media_relpath(filename)
+    if not rel:
+        abort(404)
+    local_path = _local_media_path(_ST_DIR, rel)
+    if local_path:
+        try:
+            return send_file(
+                local_path,
+                mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
+                max_age=86400,
+                conditional=True,
+            )
+        except Exception as e:
+            logging.warning("Local sticker serve failed %s: %s", rel, e)
+    proxied = _proxy_github_media("St/" + rel)
     if proxied:
         body, ctype = proxied
         return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
     abort(404)
 
 
+@limiter.exempt
 @app.route("/AnimationsEmoji/<path:filename>")
 def serve_animated_emoji_file(filename):
-    if not _safe_media_filename(filename):
-        abort(400)
-    local_path = os.path.join(_EMOJI_DIR, filename)
-    if os.path.isfile(local_path):
-        return send_from_directory(_EMOJI_DIR, filename)
-    proxied = _proxy_github_media("AnimationsEmoji/" + filename)
+    rel = _normalize_media_relpath(filename)
+    if not rel:
+        abort(404)
+    local_path = _local_media_path(_EMOJI_DIR, rel)
+    if local_path:
+        try:
+            return send_file(
+                local_path,
+                mimetype=mimetypes.guess_type(local_path)[0] or "application/octet-stream",
+                max_age=86400,
+                conditional=True,
+            )
+        except Exception as e:
+            logging.warning("Local emoji serve failed %s: %s", rel, e)
+    proxied = _proxy_github_media("AnimationsEmoji/" + rel)
     if proxied:
         body, ctype = proxied
         return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
