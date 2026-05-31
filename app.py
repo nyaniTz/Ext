@@ -411,28 +411,76 @@ limiter = Limiter(
     storage_uri=storage_uri,
 )
 
-# Stickers + animated emojis (extension loads from Koyeb; folders live in repo root)
+# Stickers + animated emojis — extension uses Koyeb URLs (same paths as GitHub repo)
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _ST_DIR = os.path.join(_REPO_ROOT, "St")
 _EMOJI_DIR = os.path.join(_REPO_ROOT, "AnimationsEmoji")
-if os.path.isdir(_ST_DIR) or os.path.isdir(_EMOJI_DIR):
-    from flask import send_from_directory
-    import logging
+_GITHUB_MEDIA_BASE = (
+    os.getenv("GITHUB_MEDIA_BASE", "https://raw.githubusercontent.com/nyaniTz/Ext/main")
+    .rstrip("/")
+)
 
-    if os.path.isdir(_ST_DIR):
 
-        @app.route("/St/<path:filename>")
-        def serve_sticker_file(filename):
-            return send_from_directory(_ST_DIR, filename)
+def _safe_media_filename(filename):
+    if not filename or ".." in filename or filename.startswith(("/", "\\")):
+        return False
+    return True
 
-        logging.info("Serving stickers from %s", _ST_DIR)
-    if os.path.isdir(_EMOJI_DIR):
 
-        @app.route("/AnimationsEmoji/<path:filename>")
-        def serve_animated_emoji_file(filename):
-            return send_from_directory(_EMOJI_DIR, filename)
+def _proxy_github_media(relative_path):
+    """When St/ or AnimationsEmoji/ are not on the Koyeb image, fetch from GitHub."""
+    url = _GITHUB_MEDIA_BASE + "/" + relative_path.lstrip("/")
+    try:
+        r = requests.get(url, timeout=90)
+        if not r.ok:
+            return None
+        ctype = r.headers.get("Content-Type") or "application/octet-stream"
+        return r.content, ctype
+    except Exception:
+        return None
 
-        logging.info("Serving animated emojis from %s", _EMOJI_DIR)
+
+from flask import send_from_directory, Response, abort
+import logging
+
+_has_st = os.path.isdir(_ST_DIR)
+_has_emoji = os.path.isdir(_EMOJI_DIR)
+logging.info(
+    "Media dirs: St=%s (%s) AnimationsEmoji=%s (%s); github fallback=%s",
+    _has_st,
+    _ST_DIR,
+    _has_emoji,
+    _EMOJI_DIR,
+    _GITHUB_MEDIA_BASE,
+)
+
+
+@app.route("/St/<path:filename>")
+def serve_sticker_file(filename):
+    if not _safe_media_filename(filename):
+        abort(400)
+    local_path = os.path.join(_ST_DIR, filename)
+    if os.path.isfile(local_path):
+        return send_from_directory(_ST_DIR, filename)
+    proxied = _proxy_github_media("St/" + filename)
+    if proxied:
+        body, ctype = proxied
+        return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
+    abort(404)
+
+
+@app.route("/AnimationsEmoji/<path:filename>")
+def serve_animated_emoji_file(filename):
+    if not _safe_media_filename(filename):
+        abort(400)
+    local_path = os.path.join(_EMOJI_DIR, filename)
+    if os.path.isfile(local_path):
+        return send_from_directory(_EMOJI_DIR, filename)
+    proxied = _proxy_github_media("AnimationsEmoji/" + filename)
+    if proxied:
+        body, ctype = proxied
+        return Response(body, mimetype=ctype, headers={"Cache-Control": "public, max-age=86400"})
+    abort(404)
 
 # Stripe configuration (secret key from environment; DO NOT hardcode)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY") or ""
