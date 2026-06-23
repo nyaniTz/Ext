@@ -2,6 +2,7 @@ import os
 import base64
 import io
 import time
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
@@ -125,15 +126,45 @@ def _is_developer_email(email):
     return email.strip().lower() in emails
 
 
-def _has_generate_page_pro(user_email, monthly_quota, plan=None):
+def _plan_expired(plan_ends_at=None, plan_expires_at=None):
+    expires_at = plan_ends_at or plan_expires_at
+    if not expires_at:
+        return False
+    try:
+        if isinstance(expires_at, (int, float)):
+            expires_at = datetime.fromtimestamp(expires_at, tz=timezone.utc)
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if getattr(expires_at, "tzinfo", None) is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at <= datetime.now(timezone.utc)
+    except Exception:
+        return False
+
+
+def _effective_plan_and_quota(plan=None, monthly_quota=None, plan_ends_at=None, plan_expires_at=None):
+    p = str(plan or "free").strip().lower() or "free"
+    try:
+        quota = int(monthly_quota or FREE_MONTHLY_QUOTA)
+    except Exception:
+        quota = FREE_MONTHLY_QUOTA
+    paidish = p not in ("free", "") or quota >= TIER_5_MONTHLY_QUOTA
+    if paidish and _plan_expired(plan_ends_at, plan_expires_at):
+        return "free", FREE_MONTHLY_QUOTA, True
+    return p, quota, False
+
+
+def _has_generate_page_pro(user_email, monthly_quota, plan=None, plan_ends_at=None, plan_expires_at=None):
     """Pro visual email builder: paid tier, non-free plan, or developer allowlist."""
     if user_email and _is_developer_email(user_email):
         return True
-    p = str(plan or "").strip().lower()
+    p, quota, expired = _effective_plan_and_quota(plan, monthly_quota, plan_ends_at, plan_expires_at)
+    if expired:
+        return False
     if p and p not in ("free", ""):
         return True
     try:
-        return int(monthly_quota or 0) >= TIER_5_MONTHLY_QUOTA
+        return int(quota or 0) >= TIER_5_MONTHLY_QUOTA
     except Exception:
         return False
 
@@ -154,19 +185,28 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         with conn.cursor() as cur:
             # Prefer including usage_reset_at (added later). Fall back if column doesn't exist.
             usage_reset_at = None
+            plan_ends_at = None
+            plan_expires_at = None
             row = None
             try:
                 cur.execute(
-                    "SELECT monthly_quota, plan, is_blocked, usage_reset_at FROM users WHERE id::text = %s::text",
+                    "SELECT monthly_quota, plan, is_blocked, usage_reset_at, plan_ends_at, plan_expires_at FROM users WHERE id::text = %s::text",
                     (str(user_id),),
                 )
                 row = cur.fetchone()
                 if row and len(row) >= 4:
                     usage_reset_at = row[3]
+                if row and len(row) >= 6:
+                    plan_ends_at = row[4]
+                    plan_expires_at = row[5]
             except Exception as col_err:
                 err_code = getattr(col_err, "pgcode", None)
                 # Undefined column
                 if err_code == "42703":
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                     cur.execute(
                         "SELECT monthly_quota, plan, is_blocked FROM users WHERE id::text = %s::text",
                         (str(user_id),),
@@ -177,11 +217,36 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
         if not row:
             return True, 0, FREE_MONTHLY_QUOTA, 0, 0
         monthly_quota, plan, is_blocked = row[0], row[1], row[2]
-        quota = int(monthly_quota or FREE_MONTHLY_QUOTA)
+        plan, quota, plan_expired = _effective_plan_and_quota(plan, monthly_quota, plan_ends_at, plan_expires_at)
         if is_blocked:
             return False, 0, quota, 0, 0
+        if plan_expired:
+            usage_reset_at = None
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE users
+                        SET plan = 'free',
+                            monthly_quota = %s,
+                            updated_at = NOW()
+                        WHERE id::text = %s::text
+                          AND COALESCE(trim(lower(plan)), '') NOT IN ('', 'free')
+                          AND (
+                            (plan_ends_at IS NOT NULL AND plan_ends_at <= NOW())
+                            OR (plan_expires_at IS NOT NULL AND plan_expires_at <= NOW())
+                          )
+                        """,
+                        (FREE_MONTHLY_QUOTA, str(user_id)),
+                    )
+                    conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
         # Compute voice limits from monthly_quota, not from "is_paid".
-        voice_play_limit, voice_record_limit = _voice_limits_from_monthly_quota(int(monthly_quota or FREE_MONTHLY_QUOTA))
+        voice_play_limit, voice_record_limit = _voice_limits_from_monthly_quota(quota)
         month_start = "date_trunc('month', NOW() AT TIME ZONE 'UTC')"
         with conn.cursor() as cur:
             cur.execute(
@@ -212,7 +277,7 @@ def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_rec
                     used_after = max(0, used_credits_total - used_before)
                     used_credits_effective = min(used_before, FREE_MONTHLY_QUOTA) + used_after
                     # Bonus: remaining free quota + paid quota (paid quota is users.monthly_quota)
-                    quota = int(monthly_quota or FREE_MONTHLY_QUOTA) + FREE_MONTHLY_QUOTA
+                    quota = int(quota or FREE_MONTHLY_QUOTA) + FREE_MONTHLY_QUOTA
             except Exception:
                 used_credits_effective = used_credits_total
 
@@ -1455,20 +1520,51 @@ def generate():
             out["quota"] = quota
             user_email = (user.get("email") if isinstance(user, dict) else None) or None
             user_plan = None
+            user_plan_ends_at = None
+            user_plan_expires_at = None
+            conn_gp = None
             try:
                 conn_gp = _get_pg_conn()
                 if conn_gp and user_id:
                     with conn_gp.cursor() as cur_gp:
-                        cur_gp.execute(
-                            "SELECT plan FROM users WHERE id::text = %s::text",
-                            (str(user_id),),
-                        )
+                        try:
+                            cur_gp.execute(
+                                "SELECT plan, plan_ends_at, plan_expires_at FROM users WHERE id::text = %s::text",
+                                (str(user_id),),
+                            )
+                        except Exception as col_err:
+                            if getattr(col_err, "pgcode", None) == "42703":
+                                try:
+                                    conn_gp.rollback()
+                                except Exception:
+                                    pass
+                                cur_gp.execute(
+                                    "SELECT plan FROM users WHERE id::text = %s::text",
+                                    (str(user_id),),
+                                )
+                            else:
+                                raise
                         row_gp = cur_gp.fetchone()
                         if row_gp:
                             user_plan = row_gp[0]
+                            if len(row_gp) >= 3:
+                                user_plan_ends_at = row_gp[1]
+                                user_plan_expires_at = row_gp[2]
             except Exception:
                 user_plan = None
-            out["generate_page_pro"] = _has_generate_page_pro(user_email, quota, user_plan)
+            finally:
+                try:
+                    if conn_gp:
+                        conn_gp.close()
+                except Exception:
+                    pass
+            out["generate_page_pro"] = _has_generate_page_pro(
+                user_email,
+                quota,
+                user_plan,
+                user_plan_ends_at,
+                user_plan_expires_at,
+            )
         return jsonify(out)
         
     except Exception as e:
