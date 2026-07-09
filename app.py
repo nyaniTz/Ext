@@ -2,7 +2,7 @@ import os
 import base64
 import io
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 import requests
@@ -167,6 +167,56 @@ def _has_generate_page_pro(user_email, monthly_quota, plan=None, plan_ends_at=No
         return int(quota or 0) >= TIER_5_MONTHLY_QUOTA
     except Exception:
         return False
+
+
+PRO_EDITOR_TRIAL_HOURS = 24
+
+
+def _pro_editor_trial_for_email(user_email: str | None):
+    """
+    One-time Pro editor trial (24h) keyed by email (server-side).
+    This avoids "clear cache and get trial again" as long as the same email is used.
+
+    Returns (is_active: bool, ends_at_iso: str|None)
+    """
+    try:
+        if not user_email or not isinstance(user_email, str):
+            return False, None
+        if _is_developer_email(user_email):
+            # Dev/test accounts treated as always-access (no trial needed).
+            return True, None
+        conn = _get_pg_conn()
+        if not conn:
+            return False, None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT registered_at
+                    FROM users
+                    WHERE lower(email) = lower(%s)
+                      AND registered_at IS NOT NULL
+                    ORDER BY registered_at ASC
+                    LIMIT 1
+                    """,
+                    (user_email,),
+                )
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    return False, None
+                reg_at = row[0]
+                if getattr(reg_at, "tzinfo", None) is None:
+                    reg_at = reg_at.replace(tzinfo=timezone.utc)
+                ends = reg_at + timedelta(hours=PRO_EDITOR_TRIAL_HOURS)
+                now = datetime.now(timezone.utc)
+                return (now < ends), ends.isoformat().replace("+00:00", "Z")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        return False, None
 
 
 def check_quota(user_id, required_credits=0, for_voice_play=False, for_voice_record=False, user_email=None):
@@ -1565,6 +1615,17 @@ def generate():
                 user_plan_ends_at,
                 user_plan_expires_at,
             )
+            # Pro editor access is broader than "paid pro plan":
+            # - paid plan unlocks
+            # - first-day (24h) trial unlocks (server-side by email)
+            paid_pro = bool(out.get("generate_page_pro"))
+            trial_active, trial_ends_at = (False, None)
+            if not paid_pro:
+                trial_active, trial_ends_at = _pro_editor_trial_for_email(user_email)
+            out["pro_editor_access"] = bool(paid_pro or trial_active)
+            out["pro_editor_trial"] = bool(trial_active and not paid_pro)
+            if trial_ends_at:
+                out["pro_editor_trial_ends_at"] = trial_ends_at
         return jsonify(out)
         
     except Exception as e:
