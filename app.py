@@ -1391,9 +1391,18 @@ def generate():
             "o4-mini": "o1-mini",
         }
         model = _model_alias.get(raw_model, raw_model)
-        # Gemini: 1.5 names often 404 on v1beta; use 2.0-flash as supported default
+        # Gemini: 1.5 / 2.0 names are retired on v1beta; map to current Flash.
         if model.lower().startswith("gemini"):
-            _gemini_alias = {"gemini-1.5-flash": "gemini-2.0-flash", "gemini-1.5-pro": "gemini-2.0-flash", "gemini-1.5-flash-latest": "gemini-2.0-flash", "gemini-1.5-pro-latest": "gemini-2.0-flash"}
+            _gemini_alias = {
+                "gemini-1.5-flash": "gemini-2.5-flash",
+                "gemini-1.5-pro": "gemini-2.5-flash",
+                "gemini-1.5-flash-latest": "gemini-2.5-flash",
+                "gemini-1.5-pro-latest": "gemini-2.5-flash",
+                "gemini-2.0-flash": "gemini-2.5-flash",
+                "gemini-2.0-flash-001": "gemini-2.5-flash",
+                "gemini-2.0-flash-lite": "gemini-2.5-flash",
+                "gemini-pro": "gemini-2.5-flash",
+            }
             model = _gemini_alias.get(model.lower(), model)
         model_lower = model.lower()
 
